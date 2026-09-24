@@ -1,8 +1,10 @@
 {
-  "name": "prefaix",
-  "version": "0.0.1",
-  "description": "PrefAIx \u2014 Forge-class : shell UX with a swappable AI agent backend (pi first)",
+  "name": "@miraiforge/prefaix",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PrefAIx — Forge-class : shell UX with a swappable AI agent backend (pi first)",
   "license": "Apache-2.0",
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/MiraiForge/prefaix.git"
@@ -22,9 +24,10 @@
     "cli"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.19"
   },
   "files": [
+    "dist",
     "README.md",
     "LICENSE"
   ],

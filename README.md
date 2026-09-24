@@ -5,12 +5,12 @@
 Forge-class shell UX (zsh, fish, bash) with a swappable AI agent backend. First adapter: [pi](https://github.com/badlogic/pi-mono).
 
 - Site: [prefaix.dev](https://prefaix.dev)
-- npm: `prefaix` (coming soon)
+- npm: `@miraiforge/prefaix` (not yet published; command will be `prefaix`)
 
 ## Status
 
-Scaffolding. See the project plan for architecture (`AgentPort`, multi-shell, PiAdapter).
+Pre-implementation. See [docs/DESIGN.md](docs/DESIGN.md) for the technical design and [docs/ROADMAP.md](docs/ROADMAP.md) for milestones and tasks.
 
 ## License
 
-Apache-2.0 (planned)
+Apache-2.0
