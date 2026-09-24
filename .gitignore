@@ -9,3 +9,12 @@ coverage/
 !.env.example
 .prefaix/
 *.tsbuildinfo
+
+# Beads / Dolt files (added by bd init)
+# Issue data lives only in the private DoltHub database; never commit bd's JSONL
+# (interactions audit log, issues export, events).
+.beads/*.jsonl
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
