@@ -1,8 +1,7 @@
 {
   "name": "prefaix",
-  "version": "0.0.0",
-  "private": true,
-  "description": "PrefAIx — Forge-class : shell UX with a swappable AI agent backend (pi first)",
+  "version": "0.0.1",
+  "description": "PrefAIx \u2014 Forge-class : shell UX with a swappable AI agent backend (pi first)",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -24,5 +23,12 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "files": [
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }
