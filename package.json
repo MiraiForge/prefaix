@@ -1,0 +1,28 @@
+{
+  "name": "prefaix",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PrefAIx — Forge-class : shell UX with a swappable AI agent backend (pi first)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MiraiForge/prefaix.git"
+  },
+  "homepage": "https://prefaix.dev",
+  "bugs": {
+    "url": "https://github.com/MiraiForge/prefaix/issues"
+  },
+  "keywords": [
+    "ai",
+    "shell",
+    "zsh",
+    "fish",
+    "bash",
+    "pi",
+    "coding-agent",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}
