@@ -9,7 +9,7 @@ Forge-class shell UX (zsh, fish, bash) with a swappable AI agent backend. First 
 
 ## Status
 
-Pre-implementation. See [docs/DESIGN.md](docs/DESIGN.md) for the technical design and [docs/ROADMAP.md](docs/ROADMAP.md) for milestones and tasks.
+M2 (core) in progress; nothing runs yet. See [docs/DESIGN.md](docs/DESIGN.md) for the technical design and [docs/ROADMAP.md](docs/ROADMAP.md) for milestones and tasks.
 
 ## Development
 
@@ -25,8 +25,11 @@ bun run build
 CI runs the same checks on Ubuntu and macOS with Node 22 and 24. The tests use no
 live models; see [AGENTS.md](AGENTS.md) for the live-model restrictions.
 
-Application source is intentionally empty during M0. The build skips with a
-notice until `src/cli/index.ts` or `src/agents/pi/bridge.ts` exists, then emits
+`src/core/` holds the backend-independent contracts: the `AgentPort` types,
+error and exit codes, ULID-based identifiers, XDG path resolution with the
+`sun_path` fallback, a result type, and a line logger. There are no entry points
+yet, so the build skips with a notice until `src/cli/index.ts` or
+`src/agents/pi/bridge.ts` exists, then emits
 `dist/prefaix.js` and/or `dist/pi-bridge.js` with source maps. The CLI entry point
 must carry `#!/usr/bin/env node`; the build preserves it. Build tests verify both
 bundles in temporary fixtures without adding application stubs.
