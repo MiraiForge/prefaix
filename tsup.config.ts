@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { defineConfig } from "tsup";
 
 export default defineConfig(() => {
@@ -10,6 +10,7 @@ export default defineConfig(() => {
   );
 
   if (Object.keys(entry).length === 0) {
+    rmSync("dist", { recursive: true, force: true });
     console.info("No application entry points yet; skipping build.");
     return [];
   }

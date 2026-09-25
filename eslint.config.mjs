@@ -3,6 +3,7 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import prettier from "eslint-config-prettier/flat";
 import globals from "globals";
 import tseslint from "typescript-eslint";
+import adapterBoundary from "./scripts/eslint-rules/adapter-boundary.mjs";
 
 function boundary(regex, message) {
   const selectorPattern = regex.replaceAll("/", "\\/");
@@ -15,6 +16,10 @@ function boundary(regex, message) {
       "error",
       {
         selector: `ImportExpression[source.value=/${selectorPattern}/]`,
+        message,
+      },
+      {
+        selector: `ImportExpression[source.type='TemplateLiteral'][source.expressions.length=0] TemplateElement[value.cooked=/${selectorPattern}/]`,
         message,
       },
       {
@@ -51,6 +56,14 @@ export default defineConfig([
       "(^|/)agents(/|$)",
       "This layer must not import agents; use backend-independent core contracts.",
     ),
+  },
+  {
+    files: ["src/agents/**/*.ts"],
+    ignores: ["src/agents/registry.ts"],
+    plugins: {
+      architecture: { rules: { "adapter-boundary": adapterBoundary } },
+    },
+    rules: { "architecture/adapter-boundary": "error" },
   },
   prettier,
 ]);

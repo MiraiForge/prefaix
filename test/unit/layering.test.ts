@@ -57,10 +57,46 @@ describe("architecture import boundaries", () => {
       "no-restricted-syntax",
     ],
     [
+      "client template import",
+      "src/client/run.ts",
+      "export const adapter = import(`../agents/pi/adapter.js`);",
+      "no-restricted-syntax",
+    ],
+    [
       "daemon dynamic concrete adapter",
       "src/daemon/pool.ts",
       'export const adapter = import("../agents/pi/adapter.js");',
       "no-restricted-syntax",
+    ],
+    [
+      "cross-adapter import",
+      "src/agents/fake/adapter.ts",
+      'export * from "../pi/adapter.js";',
+      "architecture/adapter-boundary",
+    ],
+    [
+      "nested cross-adapter dynamic import",
+      "src/agents/pi/transport/rpc.ts",
+      'export const fake = import("../../fake/adapter.js");',
+      "architecture/adapter-boundary",
+    ],
+    [
+      "cross-adapter type import",
+      "src/agents/fake/adapter.ts",
+      'export type Session = import("../pi/adapter.js").Session;',
+      "architecture/adapter-boundary",
+    ],
+    [
+      "cross-adapter template import",
+      "src/agents/fake/adapter.ts",
+      "export const pi = import(`../pi/adapter.js`);",
+      "architecture/adapter-boundary",
+    ],
+    [
+      "non-registry agent helper importing a concrete adapter",
+      "src/agents/helper.ts",
+      'export * from "./pi/adapter.js";',
+      "architecture/adapter-boundary",
     ],
   ])("rejects %s", async (_name, filePath, code, rule) => {
     const [result] = await eslint.lintText(code, { filePath });
@@ -78,6 +114,9 @@ describe("architecture import boundaries", () => {
     ],
     ["src/agents/registry.ts", 'export * from "./pi/adapter.js";'],
     ["src/agents/pi/adapter.ts", 'export * from "./rpc.js";'],
+    ["src/agents/pi/transport/rpc.ts", 'export * from "../mapping.js";'],
+    ["src/agents/pi/adapter.ts", 'export * from "../../core/agent-port.js";'],
+    ["src/agents/second/adapter.ts", 'export * from "./transport.js";'],
     [
       "test/unit/adapter.test.ts",
       'export * from "../../src/agents/pi/adapter.js";',

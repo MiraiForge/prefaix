@@ -53,6 +53,16 @@ describe("application bundles", () => {
     expect(existsSync(join(cwd, "dist"))).toBe(false);
   });
 
+  it("removes stale bundles when the source tree becomes empty", () => {
+    const cwd = workspace();
+    mkdirSync(join(cwd, "dist"));
+    writeFileSync(join(cwd, "dist/prefaix.js"), "obsolete CLI");
+    writeFileSync(join(cwd, "dist/pi-bridge.js"), "obsolete bridge");
+    const result = build(cwd);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(existsSync(join(cwd, "dist"))).toBe(false);
+  });
+
   it("builds both named ESM bundles with source maps and preserves the CLI shebang", () => {
     const cwd = workspace();
     mkdirSync(join(cwd, "src/cli"), { recursive: true });
