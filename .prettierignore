@@ -1,0 +1,7 @@
+.beads/
+.agents/
+.claude/
+.codex/
+bun.lock
+# Preserve hand-wrapped design documents and generated instruction blocks.
+**/*.md
