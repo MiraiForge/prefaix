@@ -2,9 +2,13 @@ import { spawn } from "node:child_process";
 
 const extra = process.argv.slice(2);
 const t0 = performance.now();
-const child = spawn("pi", ["--mode", "rpc", "--no-session", "--offline", ...extra], {
-  stdio: ["pipe", "pipe", "pipe"],
-});
+const child = spawn(
+  "pi",
+  ["--mode", "rpc", "--no-session", "--offline", ...extra],
+  {
+    stdio: ["pipe", "pipe", "pipe"],
+  },
+);
 let buf = "";
 let stderrBytes = 0;
 child.stderr.on("data", (c) => (stderrBytes += c.length));
