@@ -66,6 +66,24 @@ describe("logger", () => {
     );
   });
 
+  it("escapes control characters in scopes and field names too", () => {
+    const { lines, logger } = capture({ scope: "daemon" });
+    logger.child("env\nINFO  forged").info("keys", {
+      "PATH\n2026-01-01T00:00:00.000Z INFO  forged": 1,
+      "a b": 2,
+      "a=b": 3,
+      "": 4,
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.split("\n")).toHaveLength(1);
+    expect(lines[0]).toBe(
+      "2026-09-25T12:00:00.000Z INFO  " +
+        '"daemon.env\\nINFO  forged": keys ' +
+        '"PATH\\n2026-01-01T00:00:00.000Z INFO  forged"=1 ' +
+        '"a b"=2 "a=b"=3 ""=4',
+    );
+  });
+
   it("quotes field values that are not bare tokens", () => {
     const circular: Record<string, unknown> = {};
     circular["self"] = circular;

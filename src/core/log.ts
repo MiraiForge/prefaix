@@ -29,9 +29,17 @@ export function logLevelFromEnv(
   return debug && debug !== "0" ? "debug" : "info";
 }
 
+function escapeControl(text: string): string {
+  return /\p{Cc}/u.test(text) ? JSON.stringify(text) : text;
+}
+
+function formatToken(text: string): string {
+  return /^[^\s"=\p{Cc}]+$/u.test(text) ? text : JSON.stringify(text);
+}
+
 function formatValue(value: unknown): string {
-  if (typeof value === "string" && /^[^\s"=\p{Cc}]+$/u.test(value)) {
-    return value;
+  if (typeof value === "string") {
+    return formatToken(value);
   }
   if (value instanceof Error) {
     return JSON.stringify(`${value.name}: ${value.message}`);
@@ -43,8 +51,8 @@ function formatValue(value: unknown): string {
   }
 }
 
-// One record per line: control characters in the message are escaped so a
-// multi-line message can't forge extra records.
+// One record per line: control characters in the scope, message, and field
+// names and values are escaped, so no part of a call can forge extra records.
 export function formatLogLine(
   time: Date,
   level: LogLevel,
@@ -52,11 +60,11 @@ export function formatLogLine(
   message: string,
   fields: LogFields = {},
 ): string {
-  const text = /\p{Cc}/u.test(message) ? JSON.stringify(message) : message;
+  const text = escapeControl(message);
   const parts = [time.toISOString(), level.toUpperCase().padEnd(5)];
-  parts.push(scope === undefined ? text : `${scope}: ${text}`);
+  parts.push(scope === undefined ? text : `${escapeControl(scope)}: ${text}`);
   for (const [key, value] of Object.entries(fields)) {
-    parts.push(`${key}=${formatValue(value)}`);
+    parts.push(`${formatToken(key)}=${formatValue(value)}`);
   }
   return parts.join(" ");
 }
