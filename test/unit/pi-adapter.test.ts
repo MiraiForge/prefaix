@@ -1,4 +1,10 @@
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -154,12 +160,12 @@ describe("spawn plan", () => {
 });
 
 describe("prompt composition", () => {
-  it("keeps the user's text untouched when the bridge is loaded", () => {
+  it("renders the section the bridge patches", () => {
     const block = contextBlock(input("fix the failing test"));
     expect(block).toContain("/Users/tester/proj/packages/api");
     expect(block).toContain("git pull (exit 0)");
     expect(block).toContain("bun test auth");
-    expect(block).toContain("<shell-context>");
+    expect(block).toContain("<prefaix>");
   });
 
   it("falls back to a prepended context block without the bridge", async () => {
@@ -171,7 +177,7 @@ describe("prompt composition", () => {
     );
     const message = String(prompt?.["message"]);
     // The fallback is documented, and the visible text is still the last part.
-    expect(message).toContain("<shell-context>");
+    expect(message).toContain("<prefaix>");
     expect(message.endsWith("fix the failing test")).toBe(true);
     await session.close();
   });
@@ -734,22 +740,32 @@ describe("context block corners", () => {
     expect(contextBlock(input("hi"))).toContain("bun test auth");
   });
 
-  it("includes a persona's guideline when it has one", () => {
+  it("includes a persona's guideline and tool set when it has one", () => {
     const block = contextBlock({
       text: "hi",
       context: CONTEXT,
-      persona: { name: "plan", guideline: "Numbered steps" },
+      persona: {
+        name: "plan",
+        guideline: "Numbered steps",
+        tools: ["read", "grep"],
+      },
     });
-    expect(block).toContain("Persona: Numbered steps");
+    expect(block).toContain('You are answering as the "plan" persona.');
+    expect(block).toContain("Numbered steps");
+    expect(block).toContain("read, grep");
   });
 
-  it("omits the persona line when the guideline is empty", () => {
+  it("still names a persona whose guideline is empty", () => {
     const block = contextBlock({
       text: "hi",
       context: CONTEXT,
       persona: { name: "plan", guideline: "" },
     });
-    expect(block).not.toContain("Persona:");
+    expect(block).toContain('You are answering as the "plan" persona.');
+  });
+
+  it("omits the persona section entirely when there is no persona", () => {
+    expect(contextBlock(input("hi"))).not.toContain("<persona>");
   });
 });
 
@@ -785,10 +801,18 @@ describe("state and usage from a live child", () => {
     await session.close();
   });
 
-  it("still sends context when a bridge is configured", async () => {
-    const tracePath = tempTrace();
+  it("prepends nothing when the bridge is live, and writes the turn file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pfx-bridge-"));
+    const tracePath = join(dir, "commands.jsonl");
     const adapter = createPiAdapter({
       bridgePath: "/pfx/pi-bridge.js",
+      turnsDir: dir,
+      // A child announces itself the way the extension does: a ready file
+      // named after its own pid, under the directory the adapter named.
+      bridgeReady: (file) => {
+        writeFileSync(file, "{}\\n");
+        return true;
+      },
       rpc: {
         bin: process.execPath,
         args: [CHILD, join(FIXTURES, "stream.jsonl")],
@@ -801,16 +825,50 @@ describe("state and usage from a live child", () => {
       },
     });
     const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
+    expect(session.bridgeLive).toBe(true);
     await run(session, input("exactly what I typed"));
     const prompt = trace(tracePath).find(
       (command) => command["type"] === "prompt",
     );
-    // The bridge cannot carry context until it reads the turn file, so the
-    // context block is still here rather than silently dropped.
-    expect(prompt?.["message"]).toContain("<shell-context>");
-    expect(String(prompt?.["message"]).endsWith("exactly what I typed")).toBe(
-      true,
+    // D9: the visible user message is exactly what the user typed, and the
+    // context file the extension reads is gone once the turn is over (§10).
+    expect(prompt?.["message"]).toBe("exactly what I typed");
+    expect(readdirSync(dir).filter((name) => name.endsWith(".json"))).toEqual(
+      [],
     );
+    // Closing the child also clears the proof of life it left behind.
+    await session.close();
+    expect(readdirSync(dir)).toEqual(["commands.jsonl"]);
+  });
+
+  it("prepends the context block when the bridge did not load", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pfx-bridge-"));
+    const tracePath = join(dir, "commands.jsonl");
+    const adapter = createPiAdapter({
+      bridgePath: "/pfx/pi-bridge.js",
+      turnsDir: dir,
+      bridgeReady: () => false,
+      rpc: {
+        bin: process.execPath,
+        args: [CHILD, join(FIXTURES, "stream.jsonl")],
+        cwd: ROOT,
+        env: { PREFAIX_CHILD_TRACE: tracePath },
+        requestTimeoutMs: 2_000,
+        readyTimeoutMs: 4_000,
+        termGraceMs: 300,
+        killGraceMs: 300,
+      },
+    });
+    const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
+    expect(session.bridgeLive).toBe(false);
+    await run(session, input("exactly what I typed"));
+    const prompt = trace(tracePath).find(
+      (command) => command["type"] === "prompt",
+    );
+    const message = String(prompt?.["message"]);
+    // A bridge that did not load must not silently drop the context.
+    expect(message).toContain("<prefaix>");
+    expect(message.endsWith("exactly what I typed")).toBe(true);
     await session.close();
   });
 
@@ -1295,6 +1353,89 @@ describe("a backend that cannot be spawned", () => {
   });
 });
 
+describe("the bridge probe, corner by corner", () => {
+  it("does not probe at all when there is nowhere to put the bridge", async () => {
+    // No bundle, no turns dir, no pid: the adapter cannot tell whether the
+    // bridge is live, so it says no and the turn falls back to prepending.
+    const adapter = createPiAdapter({
+      rpc: {
+        bin: process.execPath,
+        args: [CHILD, join(FIXTURES, "stream.jsonl")],
+        cwd: ROOT,
+        env: {},
+      },
+    });
+    const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
+    expect(session.bridgeLive).toBe(false);
+    await session.close();
+  });
+
+  it("asks the filesystem when the caller did not say", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pfx-probe-"));
+    const adapter = createPiAdapter({
+      turnsDir: dir,
+      rpc: {
+        bin: process.execPath,
+        args: [CHILD, join(FIXTURES, "stream.jsonl")],
+        cwd: ROOT,
+        env: {},
+      },
+    });
+    const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
+    // Nothing wrote a ready file, so the answer is no and no bundle is logged.
+    expect(session.bridgeLive).toBe(false);
+    await session.close();
+  });
+
+  it("takes the caller's own probe when one was given", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pfx-probe-"));
+    const lines: string[] = [];
+    const adapter = createPiAdapter({
+      turnsDir: dir,
+      bridgeReady: () => true,
+      log: (message) => lines.push(message),
+      rpc: {
+        bin: process.execPath,
+        args: [CHILD, join(FIXTURES, "stream.jsonl")],
+        cwd: ROOT,
+        env: {},
+      },
+    });
+    const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
+    // A probe that says yes but no bundle to load is a contradiction, and the
+    // adapter treats the bundle as the authority.
+    expect(session.bridgeLive).toBe(false);
+    await session.close();
+  });
+
+  it("names the bundle it could not load", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pfx-probe-"));
+    const lines: { message: string; fields: Record<string, unknown> }[] = [];
+    const bundle = join(dir, "pi-bridge.js");
+    const adapter = createPiAdapter({
+      turnsDir: dir,
+      bridgePath: bundle,
+      bridgeReady: () => false,
+      log: (message, fields) => lines.push({ message, fields: fields ?? {} }),
+      rpc: {
+        bin: process.execPath,
+        args: [CHILD, join(FIXTURES, "stream.jsonl")],
+        cwd: ROOT,
+        env: {},
+      },
+    });
+    const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
+    // The log line says what happened and the fields say which bundle, which
+    // is what `prefaix doctor` reads back.
+    expect(lines.at(-1)?.message).toContain("did not load");
+    expect(lines.at(-1)?.fields).toMatchObject({
+      bridgePath: bundle,
+      root: ROOT,
+    });
+    await session.close();
+  });
+});
+
 describe("adapter edges the review found", () => {
   it("probes with no PATH at all", async () => {
     // An empty env rather than an empty PATH, which is a different branch.
@@ -1371,10 +1512,25 @@ describe("adapter edges the review found", () => {
     expect(events.filter((event) => event.type === "settled")).toHaveLength(1);
   });
 
-  it("does not claim a live persona switch", () => {
-    // A persona is applied by the spawn arguments, so switching after open is
-    // only recorded locally. Claiming otherwise would have a caller believe a
-    // read-only persona is active while pi still has the original tools.
+  it("claims a live persona switch only when the bridge is configured", () => {
+    // Without the bridge a persona is applied by the spawn arguments, so
+    // switching after open needs a respawn. Claiming otherwise would leave a
+    // caller believing a read-only persona is active while pi still has the
+    // original tools.
     expect(createPiAdapter().capabilities.personasWithoutRespawn).toBe(false);
+    expect(
+      createPiAdapter({
+        bridgePath: "/pfx/pi-bridge.js",
+        turnsDir: "/tmp/turns",
+      }).capabilities.personasWithoutRespawn,
+    ).toBe(true);
+    // A bridge path with nowhere to put turn files is not a usable bridge.
+    expect(
+      createPiAdapter({ bridgePath: "/pfx/pi-bridge.js" }).capabilities
+        .personasWithoutRespawn,
+    ).toBe(false);
+    expect(
+      createPiAdapter({ turnsDir: "/tmp/turns" }).capabilities.contextSections,
+    ).toBe(false);
   });
 });

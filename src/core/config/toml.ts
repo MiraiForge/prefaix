@@ -4,6 +4,7 @@
 
 import { parse, TomlError } from "smol-toml";
 import { isAbsolute } from "node:path";
+import { isCompilablePattern, splitInlineFlags } from "../pattern.js";
 import {
   camelize,
   expandHome,
@@ -49,14 +50,18 @@ function list(values: readonly string[] | undefined): string {
   return values === undefined ? "" : ` (${values.join(", ")})`;
 }
 
+// Validated through the same compiler the redactor uses, so a pattern the
+// config accepts is a pattern that will actually run (DESIGN §6 documents the
+// `(?i)…` spelling, which JavaScript cannot compile on its own).
 function checkRegex(pattern: string): string | undefined {
-  try {
-    new RegExp(pattern);
+  if (isCompilablePattern(pattern)) {
     return undefined;
-  } catch (cause) {
-    const detail = cause instanceof Error ? cause.message : String(cause);
-    return `${JSON.stringify(pattern)} is not a valid regular expression: ${detail}`;
   }
+  const split = splitInlineFlags(pattern);
+  const detail =
+    split.problem ??
+    "the pattern body did not compile once its inline flags were removed";
+  return `${JSON.stringify(pattern)} is not a valid regular expression: ${detail}`;
 }
 
 function checkItems(

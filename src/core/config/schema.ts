@@ -60,10 +60,15 @@ export interface SectionNode {
   readonly members: Members;
 }
 
-// A user-extensible table: `personas.<name>`. Its entry members are fields.
+// A user-extensible table: `personas.<name>`. Its entry members are fields, and
+// `defaults` holds the entries prefaix ships with (DESIGN §6). A user entry
+// with the same name replaces the default rather than merging into it, so
+// `[personas.ask] tools = [...]` is a complete override and never a surprise
+// half-override.
 export interface MapNode {
   readonly type: "map";
   readonly entry: Members;
+  readonly defaults?: Readonly<Record<string, unknown>>;
 }
 
 export type Node = FieldNode | SectionNode | MapNode;
@@ -153,8 +158,11 @@ function section(members: Members): SectionNode {
   return { type: "section", members };
 }
 
-function map(entry: Members): MapNode {
-  return { type: "map", entry };
+function map(
+  entry: Members,
+  defaults: Readonly<Record<string, unknown>>,
+): MapNode {
+  return { type: "map", entry, defaults };
 }
 
 export const CONFIG_SCHEMA: SectionNode = section({
@@ -222,10 +230,22 @@ export const CONFIG_SCHEMA: SectionNode = section({
       regex: true,
     }),
   }),
-  personas: map({
-    tools: field("tools", "optionalStringList", null),
-    guideline: field("guideline", "optionalString", null),
-  }),
+  personas: map(
+    {
+      tools: field("tools", "optionalStringList", null),
+      guideline: field("guideline", "optionalString", null),
+    },
+    {
+      ask: {
+        tools: ["read", "grep", "find", "ls"],
+        guideline: "Answer the question. Do not modify files.",
+      },
+      plan: {
+        tools: ["read", "grep", "find", "ls"],
+        guideline: "Produce a numbered plan. Do not modify files.",
+      },
+    },
+  ),
   commands: section({
     suggest: section({
       model: field("model", "optionalString", null),
@@ -272,6 +292,27 @@ function cloneValue(value: ConfigValue): ConfigValue {
   return Array.isArray(value) ? [...value] : value;
 }
 
+// A map's default entry is a small record of ConfigValues, so it is copied one
+// field at a time rather than spread, which would share the array a field holds.
+function cloneTableEntry(entry: unknown): unknown {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+    return entry;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(entry)) {
+    out[field] =
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean" ||
+      value === null
+        ? value
+        : Array.isArray(value)
+          ? [...value]
+          : value;
+  }
+  return out;
+}
+
 export function memberDefaults(members: Members): Record<string, ConfigValue> {
   const out: Record<string, ConfigValue> = {};
   for (const [key, node] of Object.entries(members)) {
@@ -282,7 +323,11 @@ export function memberDefaults(members: Members): Record<string, ConfigValue> {
         node.members,
       ) as unknown as ConfigValue;
     } else {
-      out[camelize(key)] = {} as unknown as ConfigValue;
+      const table: Record<string, unknown> = {};
+      for (const [name, entry] of Object.entries(node.defaults ?? {})) {
+        table[name] = cloneTableEntry(entry);
+      }
+      out[camelize(key)] = table as unknown as ConfigValue;
     }
   }
   return out;

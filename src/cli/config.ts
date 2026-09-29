@@ -4,7 +4,7 @@
 // process.
 
 import { readFileSync } from "node:fs";
-import { EXIT, type ExitCode } from "../core/errors.js";
+import { EXIT, type ExitCode, messageOf } from "../core/errors.js";
 import { resolvePaths } from "../core/paths.js";
 import {
   describeConfig,
@@ -45,9 +45,7 @@ export function runConfigCheck(options: ConfigCheckOptions): ExitCode {
   try {
     text = (options.readFile ?? defaultReadFile)(file);
   } catch (cause) {
-    options.err(
-      `${file}: cannot be read (${cause instanceof Error ? cause.message : String(cause)})`,
-    );
+    options.err(`${file}: cannot be read (${messageOf(cause)})`);
     options.err("Fix the permissions, or delete the file to use the defaults.");
     return EXIT.agentError;
   }

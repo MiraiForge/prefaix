@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -139,7 +139,18 @@ describe("config defaults", () => {
         deny: ["PREFAIX_*", "PWD", "OLDPWD", "SHLVL", "_"],
       },
       grammar: { passthrough: "^:\\s*($|[>|<&;$({\\[])" },
-      personas: {},
+      // The two built-in personas ship with these defaults (DESIGN §6), so a
+      // file with no [personas] section still has `:ask` and `:plan`.
+      personas: {
+        ask: {
+          tools: ["read", "grep", "find", "ls"],
+          guideline: "Answer the question. Do not modify files.",
+        },
+        plan: {
+          tools: ["read", "grep", "find", "ls"],
+          guideline: "Produce a numbered plan. Do not modify files.",
+        },
+      },
       commands: { suggest: { model: null }, commit: { maxDiffBytes: 100000 } },
     });
   });
@@ -284,6 +295,16 @@ describe("config env overrides", () => {
     ]);
   });
 
+  it("ignores an env var that names a section rather than a value", () => {
+    // `PREFAIX_UI=` sets nothing; the section's own defaults are what stand.
+    const { config, fromEnv } = resolve("", {
+      PREFAIX_UI: "",
+      PREFAIX_POOL: "",
+    });
+    expect(config.ui).toEqual(defaultConfig().ui);
+    expect(fromEnv).toEqual([]);
+  });
+
   it("accepts PREFAIX_BACKEND as an alias for agent.backend", () => {
     expect(resolve("", { PREFAIX_BACKEND: "fake" }).config.agent.backend).toBe(
       "fake",
@@ -355,11 +376,32 @@ describe("config env overrides", () => {
   });
 
   it("cannot introduce a table the config does not define", () => {
+    // DESIGN §6: env can change a leaf the file defines or leaves at its
+    // default, and it cannot introduce a key. A persona prefaix ships is at
+    // its default, so env may override it; one it does not ship may not be
+    // conjured into existence by an environment variable.
     const { config, fromEnv } = resolve("", {
-      PREFAIX_PERSONAS_PLAN_GUIDELINE: "Nope.",
+      PREFAIX_PERSONAS_REVIEW_GUIDELINE: "Nope.",
     });
-    expect(config.personas).toEqual({});
+    expect(config.personas["review"]).toBeUndefined();
     expect(fromEnv).toEqual([]);
+  });
+
+  it("can override a built-in persona's default from the environment", () => {
+    const { config, fromEnv } = resolve("", {
+      PREFAIX_PERSONAS_ASK_GUIDELINE: "Answer in one line.",
+    });
+    expect(config.personas["ask"]?.guideline).toBe("Answer in one line.");
+    // The list leaf the env did not name is untouched.
+    expect(config.personas["ask"]?.tools).toEqual([
+      "read",
+      "grep",
+      "find",
+      "ls",
+    ]);
+    expect(fromEnv).toEqual([
+      { env: "PREFAIX_PERSONAS_ASK_GUIDELINE", path: "personas.ask.guideline" },
+    ]);
   });
 
   it("ignores PREFAIX_* vars that are not settings", () => {
@@ -761,6 +803,86 @@ describe("config from a real file", () => {
     expect(config.ui.thinking).toBe("stream");
   });
 
+  it("reports a table where a user-defined map expected one", () => {
+    // `personas` is a user-extensible map, so a value that is not a table is a
+    // mistake worth saying out loud rather than dropping.
+    const dir = mkdtempSync(join(tmpdir(), "pfx-config-"));
+    const file = join(dir, "config.toml");
+    writeFileSync(file, 'personas = "ask"\n');
+    const diagnostics = checkConfig({
+      text: readFileSync(file, "utf8"),
+      home: HOME,
+    });
+    expect(diagnostics.map((one) => one.message).join("\n")).toContain(
+      "expected a table",
+    );
+  });
+
+  it("starts a nested table from nothing rather than from a stray key", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pfx-config-"));
+    const file = join(dir, "config.toml");
+    // A dotted key inside a map, which is the shape a hand-written
+    // `personas.ask.tools = [...]` produces.
+    writeFileSync(file, '[personas.ask]\ntools = ["read"]\n');
+    const config = loadConfig({ file, env: {}, home: HOME });
+    expect(config.personas["ask"]).toEqual({
+      tools: ["read"],
+      guideline: null,
+    });
+  });
+
+  it("reports a persona entry that is not a table", () => {
+    // A map entry is a small table of its own, so `tools = "read"` under a
+    // persona is a mistake worth naming rather than ignoring.
+    const diagnostics = checkConfig({
+      text: "[personas.ask]\ntools = 7\n",
+      home: HOME,
+    });
+    expect(diagnostics.length).toBeGreaterThan(0);
+  });
+
+  it("keeps a persona entry the user wrote as it is", () => {
+    const config = loadConfig({
+      text: '[personas.ask]\ntools = ["read", "bash"]\nguideline = "be brief"\n',
+      env: {},
+      home: HOME,
+    });
+    // A user entry replaces the default rather than merging with it, so the
+    // guideline the user wrote is the only one the agent is told about.
+    expect(config.personas["ask"]).toEqual({
+      tools: ["read", "bash"],
+      guideline: "be brief",
+    });
+  });
+
+  it("reads an empty optional path as unset rather than as a bad path", () => {
+    // `session_dir = ""` is how a user says "no override"; it must become null,
+    // not the empty string as a directory name.
+    const withPath = loadConfig({
+      text: '[agent.pi]\nsession_dir = "/tmp/pi-sessions"\n',
+      env: {},
+      home: HOME,
+    });
+    expect(withPath.agent.pi.sessionDir).toBe("/tmp/pi-sessions");
+    const emptied = loadConfig({
+      text: '[agent.pi]\nsession_dir = ""\n',
+      env: {},
+      home: HOME,
+    });
+    expect(emptied.agent.pi.sessionDir).toBeNull();
+  });
+
+  it("names the key a persona entry does not have", () => {
+    // A user who invents a field deserves to be told which one, rather than
+    // watching their persona quietly do nothing.
+    const [diagnostic] = checkConfig({
+      text: "[personas.ask]\nlimits = 10\n",
+      env: {},
+      home: HOME,
+    });
+    expect(diagnostic?.message).toContain("unknown key");
+  });
+
   it("uses the defaults when the file is a directory", () => {
     const dir = mkdtempSync(join(tmpdir(), "pfx-config-"));
     expect(loadConfig({ file: dir, env: {}, home: HOME })).toEqual(
@@ -783,6 +905,47 @@ describe("config from a real file", () => {
       home: HOME,
     });
     expect(config).toEqual(defaultConfig());
+  });
+});
+
+describe("a config with more than one problem", () => {
+  it("leads with the first and counts the rest", () => {
+    const text = [
+      "[pool]",
+      'max_children = "many"',
+      'spare = "yes"',
+      "[ui]",
+      'thinking = "shout"',
+    ].join("\n");
+    expect(() => loadConfig({ text, env: {}, home: HOME })).toThrow(
+      /and 2 more problems/,
+    );
+  });
+
+  it("says one more problem in the singular", () => {
+    const text = ["[pool]", 'max_children = "many"', 'spare = "yes"'].join(
+      "\n",
+    );
+    expect(() => loadConfig({ text, env: {}, home: HOME })).toThrow(
+      /and 1 more problem\)/,
+    );
+  });
+
+  it("names the file it could not read, whatever the reason", () => {
+    const file = join(
+      mkdtempSync(join(tmpdir(), "pfx-config-")),
+      "config.toml",
+    );
+    expect(() =>
+      loadConfig({
+        readFile: () => {
+          throw "the disk is on fire";
+        },
+        file,
+        env: {},
+        home: HOME,
+      }),
+    ).toThrow(/the disk is on fire/);
   });
 });
 
@@ -821,13 +984,18 @@ describe("config env corners", () => {
     ).toBeNull();
   });
 
-  it("ignores env for a persona the file does not define", () => {
+  it("ignores env for a persona prefaix does not ship", () => {
     // Covered for guidance above; this pins the list-valued leaf too.
     const { config, diagnostics } = resolve("", {
-      PREFAIX_PERSONAS_ASK_TOOLS: '["read"]',
+      PREFAIX_PERSONAS_REVIEW_TOOLS: '["read"]',
     });
-    expect(config.personas).toEqual({});
+    expect(config.personas["review"]).toBeUndefined();
     expect(diagnostics).toEqual([]);
+  });
+
+  it("overrides a built-in persona's tool list from the environment", () => {
+    const { config } = resolve("", { PREFAIX_PERSONAS_ASK_TOOLS: '["read"]' });
+    expect(config.personas["ask"]?.tools).toEqual(["read"]);
   });
 });
 
@@ -903,7 +1071,10 @@ describe("config parse, last corners", () => {
     );
   });
 
-  it("keeps a persona with no keys at all", () => {
+  it("replaces a built-in persona wholesale when the file declares it", () => {
+    // A declared table is a complete override, not a merge, so writing
+    // `[personas.ask] tools = ["read"]` never leaves the shipped guideline in
+    // place behind the user's back.
     const config = resolveConfig({
       text: "[personas.ask]\n",
       home: HOME,

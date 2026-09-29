@@ -257,6 +257,28 @@ describe("runtime fallback", () => {
     expect(paths.socket).toBe(`${paths.runtimeDir}/daemon.sock`);
   });
 
+  it("names the fallback after nobody when there is no uid to read", () => {
+    // Windows has no getuid, and a shared name in /tmp is still better than a
+    // path with `undefined` in it.
+    const getuid = process.getuid;
+    Object.defineProperty(process, "getuid", {
+      value: undefined,
+      configurable: true,
+    });
+    try {
+      const paths = resolvePaths({
+        home: "/Users/tester",
+        env: { XDG_RUNTIME_DIR: "/tmp/" + "x".repeat(120) },
+      });
+      expect(paths.runtimeDir).toBe("/tmp/prefaix--1");
+    } finally {
+      Object.defineProperty(process, "getuid", {
+        value: getuid,
+        configurable: true,
+      });
+    }
+  });
+
   it("uses the given uid in the fallback name", () => {
     const paths = resolvePaths({
       home: "/Users/tester",

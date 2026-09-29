@@ -228,6 +228,29 @@ describe("position lookup, last corners", () => {
     });
   });
 
+  it("reads a table name written in either quote style", () => {
+    expect(
+      locatePath(
+        '[personas."my plan"]\ntools = []\n',
+        "personas.my plan.tools",
+      ),
+    ).toEqual({ line: 2, column: 1 });
+  });
+
+  it("points at column one for a line that is all whitespace", () => {
+    // A line of spaces cannot match an assignment, so this only proves the
+    // column arithmetic does not produce a zero the editor cannot seek to.
+    expect(locatePath("[a]\n   \n", "a.b")).toEqual({ line: 1, column: 1 });
+  });
+
+  it("falls back to the table it looked inside", () => {
+    // With no matching key, the table's own header is the closest thing to a
+    // position, and pointing at the header beats pointing at line one.
+    expect(locatePath("[a]\nb = 1\n", "a.c")).toEqual({ line: 1, column: 1 });
+    // With no table either, there is nothing to point at.
+    expect(locatePath("b = 1\n", "c")).toBeUndefined();
+  });
+
   it("renders a diagnostic whose position is unknown", () => {
     const rendered = renderDiagnostics(
       [fileDiagnostic("a", "bad", null, null)],

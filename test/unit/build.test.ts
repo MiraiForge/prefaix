@@ -67,8 +67,10 @@ describe("application bundles", () => {
     const cwd = workspace();
     mkdirSync(join(cwd, "src/cli"), { recursive: true });
     mkdirSync(join(cwd, "src/agents/pi"), { recursive: true });
+    // The bin is the entry the package points at, so the shebang and the
+    // runnable bundle are both asserted through it.
     writeFileSync(
-      join(cwd, "src/cli/index.ts"),
+      join(cwd, "src/cli/bin.ts"),
       '#!/usr/bin/env node\nconst message: string = "cli fixture"; console.log(message);\n',
     );
     writeFileSync(

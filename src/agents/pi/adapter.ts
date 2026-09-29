@@ -5,9 +5,10 @@
 // rather than leaking into the next turn's stream.
 
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
-import { PrefaixError } from "../../core/errors.js";
+import { PrefaixError, messageOf } from "../../core/errors.js";
 import { ulid } from "../../core/ids.js";
 import type {
   AgentBackend,
@@ -27,6 +28,16 @@ import type {
   UiResponse,
 } from "../../core/agent-port.js";
 import { ABORTED, raceAbort } from "../../core/abort.js";
+import { BRIDGE_DIR_ENV } from "./bridge.js";
+import {
+  bridgeReadyFile,
+  prependBlock,
+  removeTurnContext,
+  turnContextFile,
+  writeTurnContext,
+  BRIDGE_VERSION,
+  type TurnContextFile,
+} from "./bridge-context.js";
 import { PiRpc, type PiRpcOptions } from "./rpc.js";
 import { TurnMapper, type MapperOptions } from "./mapping.js";
 import {
@@ -42,7 +53,7 @@ import {
 
 export const PI_ID = "pi";
 
-const PI_CAPABILITIES: Capabilities = {
+const PI_BASE_CAPABILITIES: Capabilities = {
   steer: true,
   followUp: true,
   abort: true,
@@ -52,19 +63,21 @@ const PI_CAPABILITIES: Capabilities = {
   slashCommands: true,
   skills: true,
   uiDialogs: true,
-  contextSections: true,
-  // A persona is applied by the spawn arguments, so a change made after open is
-  // only recorded locally. M2-7's bridge makes a live switch real; until then
-  // claiming it would leave a caller believing a read-only persona is active
-  // while pi still has the original tools.
-  personasWithoutRespawn: false,
   handoffTui: true,
+  // Both are only real when the bridge extension is in play: without it the
+  // context block is prepended to the user's message and a persona change
+  // needs a respawn. The bundle is resolved by the composition root, so an
+  // adapter built without one is deliberately the fallback shape.
+  contextSections: false,
+  personasWithoutRespawn: false,
 };
 
 export interface PiAdapterOptions {
   readonly bin?: string;
   /** The bridge extension bundle, when the capability probe passed. */
   readonly bridgePath?: string;
+  /** Where per-turn context files live; required for the bridge to work. */
+  readonly turnsDir?: string;
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly model?: string | null;
   readonly thinking?: string | null;
@@ -74,6 +87,13 @@ export interface PiAdapterOptions {
   readonly rpc?: Partial<PiRpcOptions>;
   readonly mapper?: MapperOptions;
   readonly log?: (message: string, fields?: Record<string, unknown>) => void;
+  /** Injectable so a test can decide what the probe sees. */
+  readonly bridgeReady?: (file: string) => boolean;
+}
+
+/** Whether a bridge path plus a turns dir is enough to enable the section path. */
+export function bridgeConfigured(options: PiAdapterOptions = {}): boolean {
+  return (options.bridgePath ?? "") !== "" && (options.turnsDir ?? "") !== "";
 }
 
 // pi's native ids must match [A-Za-z0-9._-] and start and end alphanumeric.
@@ -152,12 +172,24 @@ export class PiSession implements AgentSession {
   #persona: PersonaSpec | undefined;
   // The mapper of the running turn, which knows pi's own id for each dialog.
   #mapper: TurnMapper | undefined;
+  // Whether the bridge extension actually loaded for this child. A spawn that
+  // asked for the bridge and did not get it falls back to prepending, which is
+  // correct but leaves the context in the visible user message.
+  #bridgeLive = false;
+  #turnsDir: string | undefined;
+  #pid: number | undefined;
 
   constructor(
     rpc: PiRpc,
     native: NativeRef,
     options: PiAdapterOptions,
-    origin: { readonly bin: string; readonly root: string },
+    origin: {
+      readonly bin: string;
+      readonly root: string;
+      readonly turnsDir?: string;
+      /** Omit to bind the pid later, once the child exists. */
+      readonly pid?: number;
+    },
   ) {
     this.#rpc = rpc;
     this.native = native;
@@ -166,10 +198,52 @@ export class PiSession implements AgentSession {
     // than at every use.
     this.#root = origin.root === "" ? "." : origin.root;
     this.#mapperOptions = options.mapper ?? {};
+    this.#turnsDir = origin.turnsDir;
+    this.#pid = origin.pid;
+  }
+
+  /** pi's pid, which names this child's context and ready files. */
+  attachChild(pid: number | undefined): void {
+    this.#pid = pid;
+  }
+
+  /** The child pid, once it is known; undefined before the child spawns. */
+  get pid(): number | undefined {
+    return this.#pid;
   }
 
   get busy(): boolean {
     return this.#busy;
+  }
+
+  /** True when per-turn context goes out of band rather than in the message. */
+  get bridgeLive(): boolean {
+    return this.#bridgeLive;
+  }
+
+  /**
+   * Decides whether the bridge extension loaded. The extension announces
+   * itself with a ready file while loading, and pi answers its first command
+   * only after every extension has been loaded, so by the time `ready()`
+   * resolved the file is either there or never going to be.
+   */
+  probeBridge(options: {
+    readonly bridgePath?: string;
+    readonly ready?: (file: string) => boolean;
+  }): boolean {
+    const turnsDir = this.#turnsDir;
+    const pid = this.#pid;
+    if (
+      options.bridgePath === undefined ||
+      turnsDir === undefined ||
+      pid === undefined
+    ) {
+      this.#bridgeLive = false;
+      return false;
+    }
+    const exists = options.ready ?? ((path: string) => existsSync(path));
+    this.#bridgeLive = exists(bridgeReadyFile(turnsDir, pid));
+    return this.#bridgeLive;
   }
 
   get persona(): PersonaSpec | undefined {
@@ -260,27 +334,75 @@ export class PiSession implements AgentSession {
         }
       }
     } catch (cause) {
-      const message =
-        cause instanceof Error ? cause.message : "the pi turn failed";
+      const message = messageOf(cause);
       if (turn.aborted) {
         yield mapper.settle("aborted");
         return;
       }
       yield mapper.settleWithError(message);
     } finally {
+      // A turn the bridge never picked up (an abort before before_agent_start,
+      // a pi that died) must not leave its context on disk for the next turn.
+      this.#clearContextFile();
       this.#busy = false;
       this.#turnAbort = undefined;
       this.#mapper = undefined;
     }
   }
 
+  /**
+   * Sends the prompt, carrying the turn's shell context out of band when the
+   * bridge extension is live and prepending it otherwise. Writes are sequential
+   * per child, so there is no race between the file and the prompt (ADR 0004).
+   */
   #compose(input: PromptInput): string {
-    // Context is always included here. The bridge is meant to carry it out of
-    // band so the visible message stays exactly what the user typed, but until
-    // the bridge can actually read the turn context, dropping this block would
+    if (this.#publishContext(input)) {
+      return input.text;
+    }
+    // The bridge is absent or did not load. Dropping the block instead would
     // silently remove cwd, recent commands, the terminal, and the persona from
-    // every request. M2-7 takes this over once it writes the turn file.
-    return `${contextBlock(input)}\n\n${input.text}`;
+    // every request, so the same text is prepended to the message.
+    return `${prependBlock(input.context, input.persona ?? this.#persona)}\n\n${input.text}`;
+  }
+
+  #publishContext(input: PromptInput): boolean {
+    const turnsDir = this.#turnsDir;
+    const pid = this.#pid;
+    if (!this.#bridgeLive || turnsDir === undefined || pid === undefined) {
+      return false;
+    }
+    const payload: TurnContextFile = {
+      version: BRIDGE_VERSION,
+      context: input.context,
+      ...(input.persona === undefined && this.#persona === undefined
+        ? {}
+        : { persona: input.persona ?? (this.#persona as PersonaSpec) }),
+    };
+    if (!writeTurnContext(turnContextFile(turnsDir, pid), payload)) {
+      // A context file that could not be written would leave the turn with no
+      // context at all, so the prompt falls back rather than trusting it.
+      return false;
+    }
+    return true;
+  }
+
+  #clearContextFile(): void {
+    if (
+      !this.#bridgeLive ||
+      this.#turnsDir === undefined ||
+      this.#pid === undefined
+    ) {
+      return;
+    }
+    removeTurnContext(turnContextFile(this.#turnsDir, this.#pid));
+  }
+
+  /** The ready file is named after the child, so it goes when the child does. */
+  #clearReadyFile(): void {
+    if (this.#turnsDir === undefined || this.#pid === undefined) {
+      return;
+    }
+    removeTurnContext(bridgeReadyFile(this.#turnsDir, this.#pid));
   }
 
   async steer(text: string): Promise<void> {
@@ -428,6 +550,10 @@ export class PiSession implements AgentSession {
   }
 
   async setPersona(persona: PersonaSpec): Promise<void> {
+    // Recorded here and published with the next turn's context file, where the
+    // bridge swaps pi's active tools. A persona set outside a turn therefore
+    // takes effect on the next `:` rather than immediately, which is the first
+    // moment it is observable.
     this.#persona = persona;
   }
 
@@ -453,30 +579,16 @@ export class PiSession implements AgentSession {
   }
 
   async close(): Promise<void> {
+    this.#clearReadyFile();
+    this.#clearContextFile();
     await this.#rpc.close();
   }
 }
 
-// The fallback context block, used when the bridge did not load.
+// The fallback context block, used when the bridge did not load. The prose and
+// the tags come from bridge-context so the two paths are the same text.
 export function contextBlock(input: PromptInput): string {
-  const { context, persona } = input;
-  const recent = context.recent
-    .map((entry, index) => `  [${index}] ${entry.cmd}${exitSuffix(entry.exit)}`)
-    .join("\n");
-  return [
-    "<shell-context>",
-    `Shell: ${context.shell.kind} ${context.shell.version} on ${context.os} · cwd: ${context.cwd}`,
-    recent === "" ? "Recent commands: (none)" : `Recent commands:\n${recent}`,
-    `Output is rendered as streaming markdown in a terminal (${String(context.term.cols)} cols). Keep answers concise.`,
-    ...(persona?.guideline === undefined || persona.guideline === ""
-      ? []
-      : [`Persona: ${persona.guideline}`]),
-    "</shell-context>",
-  ].join("\n");
-}
-
-function exitSuffix(exit: number | null): string {
-  return exit === null ? "" : ` (exit ${String(exit)})`;
+  return prependBlock(input.context, input.persona);
 }
 
 function exists(path: string): Promise<boolean> {
@@ -527,12 +639,18 @@ function piVersion(
 
 export class PiAdapter implements AgentBackend {
   readonly id = PI_ID;
-  readonly capabilities: Capabilities = PI_CAPABILITIES;
+  readonly capabilities: Capabilities;
   readonly #options: PiAdapterOptions;
   readonly #sessions = new Set<PiSession>();
 
   constructor(options: PiAdapterOptions = {}) {
     this.#options = options;
+    this.capabilities = {
+      ...PI_BASE_CAPABILITIES,
+      ...(bridgeConfigured(options)
+        ? { contextSections: true, personasWithoutRespawn: true }
+        : {}),
+    };
   }
 
   get sessions(): readonly PiSession[] {
@@ -571,6 +689,11 @@ export class PiAdapter implements AgentBackend {
         env[key] = value;
       }
     }
+    // The bridge finds its per-turn files through this one variable rather
+    // than reconstructing the runtime layout inside pi's process.
+    if (this.#options.turnsDir !== undefined && this.#options.turnsDir !== "") {
+      env[BRIDGE_DIR_ENV] = this.#options.turnsDir;
+    }
     const rpc = new PiRpc({
       bin: plan.bin,
       args: plan.args,
@@ -593,15 +716,39 @@ export class PiAdapter implements AgentBackend {
         ? {}
         : { sessionFile: opts.resume.sessionFile }),
     };
+    const turnsDir = this.#options.turnsDir;
     const session = new PiSession(rpc, native, this.#options, {
       // The binary the child actually ran under, which a transport override
       // may have changed, so a handoff launches the same pi.
       bin: this.#options.rpc?.bin ?? plan.bin,
       root: opts.root,
+      ...(turnsDir === undefined ? {} : { turnsDir }),
     });
     this.#sessions.add(session);
     try {
       await session.ready();
+      if (turnsDir !== undefined) {
+        // The pid is what names the turn context and ready files, so it is
+        // captured from the live child rather than guessed.
+        session.attachChild(rpc.pid);
+        if (
+          !session.probeBridge({
+            ...(this.#options.bridgePath === undefined
+              ? {}
+              : { bridgePath: this.#options.bridgePath }),
+            ...(this.#options.bridgeReady === undefined
+              ? {}
+              : { ready: this.#options.bridgeReady }),
+          })
+        ) {
+          this.#options.log?.("the pi bridge extension did not load", {
+            root: opts.root,
+            ...(this.#options.bridgePath === undefined
+              ? {}
+              : { bridgePath: this.#options.bridgePath }),
+          });
+        }
+      }
     } catch (cause) {
       this.#sessions.delete(session);
       await session.close().catch(() => undefined);

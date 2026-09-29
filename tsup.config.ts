@@ -4,7 +4,7 @@ import { defineConfig } from "tsup";
 export default defineConfig(() => {
   const entry = Object.fromEntries(
     Object.entries({
-      prefaix: "src/cli/index.ts",
+      prefaix: "src/cli/bin.ts",
       "pi-bridge": "src/agents/pi/bridge.ts",
     }).filter(([, path]) => existsSync(path)),
   );

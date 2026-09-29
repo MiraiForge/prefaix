@@ -495,6 +495,81 @@ describe("fake dialog turn", () => {
     expect(text(events)).toContain("Working on main, as you chose.\n");
   });
 
+  it("abandons a parked dialog when the turn is aborted", async () => {
+    const open = await session("dialog", { sleep: async () => {} });
+    const controller = new AbortController();
+    const events: AgentEvent[] = [];
+    const turn = open.prompt(input(), controller.signal);
+    const iterator = turn[Symbol.asyncIterator]();
+    for (
+      let step = await iterator.next();
+      !step.done;
+      step = await iterator.next()
+    ) {
+      events.push(step.value);
+      // The user pressed Esc while the question was on screen, so the answer
+      // is never coming and the turn has to end on its own.
+      if (step.value.type === "ui_request") {
+        controller.abort("client asked");
+      }
+    }
+    expect(types(events)).toContain("settled");
+    expect(events.at(-1)).toEqual({
+      type: "settled",
+      stopReason: "aborted",
+    });
+  });
+
+  it("carries on when a parked dialog has nothing to wait for", async () => {
+    // A scenario that parks without ever asking is a broken script rather than
+    // a stuck turn: there is no answer coming, so the step is skipped.
+    const agent = createFakeAgent({
+      tickMs: 0,
+      sleep: async () => {},
+      steps: [
+        { type: "turn_start" },
+        { type: "text_delta", block: 0, text: "no question asked\n" },
+        { type: "text_end", block: 0 },
+        { type: "await_ui" },
+        { type: "settled", stopReason: "stop" },
+      ],
+    });
+    const open = (await agent.open(openOptions())) as FakeSession;
+    const events = await collect(open, input());
+    expect(types(events)).toEqual([
+      "turn_start",
+      "text_delta",
+      "text_end",
+      "settled",
+    ]);
+    expect(text(events)).toBe("no question asked\n");
+    await open.close();
+  });
+
+  it("records the prompt in the transcript it keeps", async () => {
+    const open = await session("hello", { sleep: async () => {} });
+    // The transcript is what a test asserts a second turn against, so the user
+    // side of it has to be the prompt that was actually sent.
+    await collect(open, input(": remember this"));
+    // The prompt is recorded exactly as it was sent; stripping the `:` is the
+    // grammar's job, and it has already happened by the time it gets here.
+    expect(open.transcript.turns.at(-1)?.user).toBe(": remember this");
+    expect(open.transcript.turns.at(-1)?.assistant).toContain("Hello");
+    await open.close();
+  });
+
+  it("reports no last answer before there has been one", async () => {
+    const open = await session("hello", { sleep: async () => {} });
+    expect(await open.lastAssistantText()).toBeNull();
+    // A turn that produced no text has no answer to report either.
+    const events = await collect(open, input());
+    void events;
+    expect(await open.lastAssistantText()).toContain(
+      "Hello from the fake backend.",
+    );
+    await open.close();
+  });
+
   it("spells out every answer shape", () => {
     expect(answerText({ value: "x" })).toBe("x");
     expect(answerText({ confirmed: true })).toBe("yes");

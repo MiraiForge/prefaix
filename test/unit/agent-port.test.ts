@@ -9,7 +9,9 @@ import type {
   PromptInput,
   StopReason,
 } from "../../src/core/agent-port.js";
-import { PrefaixError, unsupported } from "../../src/core/errors.js";
+import { PrefaixError, messageOf, unsupported } from "../../src/core/errors.js";
+import { createConfiguredBackend } from "../../src/agents/registry.js";
+import { defaultConfig } from "../../src/core/config/schema.js";
 
 // A minimal backend: it implements only the required AgentSession methods,
 // which proves the optional ones really are optional for adapters.
@@ -111,6 +113,43 @@ function describeEvent(event: AgentEvent): string {
     }
   }
 }
+
+describe("the backend the config asks for", () => {
+  it("is built from a config on its own, with nothing else supplied", () => {
+    // The daemon supplies the environment, the turns dir, a log, and finds the
+    // bridge bundle itself; every one of those is optional, and a call with
+    // none of them still has to produce a usable backend.
+    const backend = createConfiguredBackend({ config: defaultConfig() });
+    expect(backend.id).toBe("pi");
+    expect(backend.capabilities.abort).toBe(true);
+  });
+
+  it("takes the environment, the turns dir, and a log when given", () => {
+    const lines: string[] = [];
+    const backend = createConfiguredBackend({
+      config: {
+        ...defaultConfig(),
+        agent: { ...defaultConfig().agent, backend: "fake" },
+      },
+      env: { PATH: "/usr/bin" },
+      turnsDir: "/tmp/turns",
+      log: (message) => lines.push(message),
+    });
+    expect(backend.id).toBe("fake");
+    expect(lines).toEqual([]);
+  });
+});
+
+describe("a caught value that is not an error", () => {
+  it("still has a message the user can read", () => {
+    // A child process or a library can reject with anything, and `[object
+    // Object]` in front of a user is not a message.
+    expect(messageOf(new Error("boom"))).toBe("boom");
+    expect(messageOf("just a string")).toBe("just a string");
+    expect(messageOf({ code: 7 })).toBe("[object Object]");
+    expect(messageOf(undefined)).toBe("undefined");
+  });
+});
 
 describe("AgentPort", () => {
   it("streams normalized events from a minimal backend", async () => {

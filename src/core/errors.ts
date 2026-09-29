@@ -108,12 +108,20 @@ export class PrefaixError extends Error {
   }
 }
 
+/**
+ * The message to show for a caught value. A rejection from a child process or a
+ * library is not always an `Error`, so a bare string has to survive the trip to
+ * the user rather than becoming `[object Object]`.
+ */
+export function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 export function toErrorInfo(error: unknown): ErrorInfo {
   if (error instanceof PrefaixError) {
     return error.toInfo();
   }
-  const message = error instanceof Error ? error.message : String(error);
-  return { code: "INTERNAL", message };
+  return { code: "INTERNAL", message: messageOf(error) };
 }
 
 // Missing backend capabilities are a user-facing message, never a crash
