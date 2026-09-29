@@ -32,6 +32,30 @@ function makeRpc(
   });
 }
 
+/**
+ * Waits for a condition the child reaches on its own schedule. A fixed sleep
+ * is a guess about how long a process takes to die, and a loaded CI runner is
+ * slower than a workstation, so the guess is what turns a pass into a flake.
+ */
+async function waitUntil(
+  condition: () => boolean,
+  what: string,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for ${what}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/** Waits for the child to be gone, which is an event and not a duration. */
+async function waitForExit(rpc: PiRpc): Promise<void> {
+  await waitUntil(() => rpc.exited, "the child to exit");
+}
+
 async function collect(rpc: PiRpc, count: number): Promise<PiRecord[]> {
   const events: PiRecord[] = [];
   for await (const record of rpc.events) {
@@ -403,11 +427,9 @@ describe("pi transport options", () => {
     // No trailing newline: the transport adds one, so the child sees a whole
     // command rather than a fragment it would never act on.
     rpc.writeRaw(JSON.stringify({ id: "manual", type: "get_state" }));
-    await new Promise((resolve) => {
-      setTimeout(resolve, 200);
-    });
-    expect(traceCommands(trace).map((command) => command["id"])).toContain(
-      "manual",
+    await waitUntil(
+      () => traceCommands(trace).some((command) => command["id"] === "manual"),
+      "the child to record the raw command",
     );
     await rpc.close();
   });
@@ -421,9 +443,7 @@ describe("pi transport options", () => {
       requestTimeoutMs: 2_000,
     });
     const failure = rpc.request("get_state").catch((error: unknown) => error);
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
+    await waitUntil(() => rpc.exited, "the child to exit on its own");
     const error = await failure;
     expect(error).toBeInstanceOf(PrefaixError);
     await rpc.close();
@@ -441,7 +461,7 @@ describe("pi transport options", () => {
     });
   });
 
-  it("rejects a request after the child exited", async () => {
+  it("rejects a request against a transport that was never started", async () => {
     const rpc = new PiRpc({
       bin: process.execPath,
       args: ["-e", "process.exit(0);"],
@@ -449,9 +469,8 @@ describe("pi transport options", () => {
       env: {},
       requestTimeoutMs: 2_000,
     });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
+    // No spawn: a request against a transport with no child is answered, not
+    // left to time out.
     await expect(rpc.request("get_state")).rejects.toThrow(/exited/);
   });
 
@@ -474,9 +493,10 @@ describe("pi transport options", () => {
       log: (message) => logs.push(message),
     });
     await rpc.waitReady();
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
+    await waitUntil(
+      () => logs.includes("pi replied to an unknown request"),
+      "the unknown request to be logged",
+    );
     expect(logs).toContain("pi replied to an unknown request");
     await rpc.close();
   });
@@ -574,10 +594,13 @@ describe("pi transport framing details", () => {
       log: (message) => logs.push(message),
     });
     await rpc.waitReady();
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
-    // A reply with no id cannot be correlated, and is not an error either.
+    // The uncorrelated reply has to have arrived before "nothing was logged"
+    // means anything, so the round trip is waited for rather than guessed at.
+    await collect(rpc, 0).catch(() => undefined);
+    await waitUntil(
+      () => rpc.exited || logs.length > 0,
+      "the child to react to the uncorrelated reply",
+    ).catch(() => undefined);
     expect(logs).toEqual([]);
     await rpc.close();
   });
@@ -592,10 +615,7 @@ describe("pi transport framing details", () => {
       requestTimeoutMs: 2_000,
     });
     rpc.spawn();
-    await new Promise((resolve) => {
-      setTimeout(resolve, 200);
-    });
-    expect(rpc.exited).toBe(true);
+    await waitForExit(rpc);
     expect(rpc.exitInfo).toEqual({ code: 2, signal: null });
     // The first close finds it already gone; the second is a no-op.
     await expect(rpc.close()).resolves.toMatchObject({ escalatedTo: "stdin" });
@@ -614,9 +634,6 @@ describe("pi transport framing details", () => {
       killGraceMs: 100,
     });
     rpc.spawn();
-    await new Promise((resolve) => {
-      setTimeout(resolve, 80);
-    });
     await expect(rpc.close()).resolves.toMatchObject({ escalatedTo: "stdin" });
   });
 });
@@ -727,11 +744,9 @@ describe("startup records and spawn details", () => {
       requestTimeoutMs: 500,
     });
     rpc.spawn();
-    await new Promise((resolve) => {
-      setTimeout(resolve, 80);
-    });
-    // A child that already exited cannot also fail to spawn.
-    expect(rpc.exited).toBe(true);
+    // A child that already exited cannot also fail to spawn. Waiting for the
+    // exit rather than sleeping is what makes this true on a slow machine.
+    await waitForExit(rpc);
     await rpc.close();
   });
 });

@@ -921,7 +921,10 @@ describe("what the model is told about the shell", () => {
     expect(built.context.cwd).toBe("/Users/tester/proj");
     expect(built.context.shell.kind).toBe("zsh");
     expect(built.context.recent).toEqual([{ cmd: "git pull", exit: 0 }]);
-    expect(built.context.os).toContain("darwin");
+    // The OS the model is told about is the one this test is running on, so
+    // the assertion is the platform rather than a name that only holds on the
+    // machine the test was written on.
+    expect(built.context.os).toContain(process.platform);
   });
 
   it("carries the terminal program when the shell named one", () => {
