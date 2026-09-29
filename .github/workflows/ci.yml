@@ -42,6 +42,16 @@ jobs:
         run: bun run lint && bun run typecheck && bun run test:unit
       - name: AgentPort contract suite (fake and pi fixture)
         run: bun run test:contract
+      - name: Install shells for the end-to-end gates
+        # DESIGN 12.5: zsh, fish, and bash 5 on Linux; macOS already has zsh and
+        # bash, and runs bash 3.2 in its degraded mode.
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y zsh fish
+          else
+            brew install fish || echo "fish already installed"
+          fi
       - name: Shell end-to-end (pty harness)
         run: bun run test:e2e
       - name: Coverage against the 95% target
