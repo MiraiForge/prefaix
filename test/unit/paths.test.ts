@@ -231,3 +231,38 @@ describe("id-scoped paths", () => {
     },
   );
 });
+
+describe("home resolution", () => {
+  it("ignores XDG values that are relative, per the spec", () => {
+    const paths = resolvePaths({
+      home: "/Users/tester",
+      env: { XDG_CONFIG_HOME: "relative/path" },
+    });
+    expect(paths.configFile).toBe("/Users/tester/.config/prefaix/config.toml");
+  });
+
+  it("rejects a home that is not absolute", () => {
+    expect(() => resolvePaths({ home: "relative" })).toThrow(/absolute/);
+  });
+});
+
+describe("runtime fallback", () => {
+  it("falls back to /tmp when the socket path is too long", () => {
+    const paths = resolvePaths({
+      home: "/Users/tester",
+      env: { XDG_RUNTIME_DIR: "/tmp/" + "x".repeat(120) },
+    });
+    expect(paths.runtimeFallback).toBe(true);
+    expect(paths.runtimeDir).toBe(`/tmp/prefaix-${process.getuid?.() ?? -1}`);
+    expect(paths.socket).toBe(`${paths.runtimeDir}/daemon.sock`);
+  });
+
+  it("uses the given uid in the fallback name", () => {
+    const paths = resolvePaths({
+      home: "/Users/tester",
+      uid: 501,
+      env: { XDG_RUNTIME_DIR: "/tmp/" + "x".repeat(120) },
+    });
+    expect(paths.runtimeDir).toBe("/tmp/prefaix-501");
+  });
+});

@@ -1,0 +1,12 @@
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"compaction_start","reason":"manual"}
+{"delay":10}
+{"type":"compaction_end","reason":"manual","result":{"summary":"compacted 1200 tokens"},"aborted":false,"willRetry":true}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}}
+{"type":"message_update","usage":{"input":30,"output":8,"cacheRead":0,"cacheWrite":0},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"After compaction.\n"}}
+{"type":"message_update","usage":{"input":30,"output":11,"cacheRead":0,"cacheWrite":0},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"After compaction.\n"}}
+{"type":"message_update","usage":{"input":30,"output":11,"cacheRead":0,"cacheWrite":0},"assistantMessageEvent":{"type":"done","reason":"stop"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"After compaction.\n"}],"stopReason":"stop"}}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"agent_settled"}

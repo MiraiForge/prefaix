@@ -38,7 +38,27 @@ jobs:
           bun-version: "1.3.14"
       - name: Install dependencies
         run: bun install --frozen-lockfile
-      - name: Lint, typecheck, and test
+      - name: Lint, typecheck, and unit tests
+        run: bun run lint && bun run typecheck && bun run test:unit
+      - name: AgentPort contract suite (fake and pi fixture)
+        run: bun run test:contract
+      - name: Install shells for the end-to-end gates
+        # zsh and bash 5 on Linux; macOS already has both, and runs bash 3.2 in
+        # its degraded mode. fish is installed on neither until the harness
+        # drives it, which it does not yet.
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y zsh
+            # A fresh zsh finds the runner's own directories insecure and asks a
+            # question on an interactive startup; the harness would sit there.
+            compaudit || true
+          fi
+      - name: Shell end-to-end (pty harness)
+        run: bun run test:e2e
+      - name: Coverage against the 95% target
+        run: bun run coverage
+      - name: Full check
         run: bun run check
       - name: Build available entry points
         run: bun run build

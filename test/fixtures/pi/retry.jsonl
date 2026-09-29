@@ -1,0 +1,14 @@
+{"type":"agent_start"}
+{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":500,"errorMessage":"429 rate limited"}
+{"delay":20}
+{"type":"auto_retry_start","attempt":2,"maxAttempts":3,"delayMs":1500,"errorMessage":"503 upstream unavailable"}
+{"delay":20}
+{"type":"auto_retry_end","success":true,"attempt":3}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}}
+{"type":"message_update","usage":{"input":80,"output":9,"cacheRead":0,"cacheWrite":0},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Recovered.\n"}}
+{"type":"message_update","usage":{"input":80,"output":12,"cacheRead":0,"cacheWrite":0},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Recovered.\n"}}
+{"type":"message_update","usage":{"input":80,"output":12,"cacheRead":0,"cacheWrite":0},"assistantMessageEvent":{"type":"done","reason":"stop"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Recovered.\n"}],"stopReason":"stop"}}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"agent_settled"}

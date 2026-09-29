@@ -1,0 +1,10 @@
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}}
+{"type":"message_update","usage":{"input":120,"output":2,"cacheRead":0,"cacheWrite":0},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Working"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Working"}],"stopReason":"aborted"}}
+{"type":"tool_execution_start","toolCallId":"call_9","toolName":"bash","args":{"command":"sleep 30"}}
+{"untilCommand":"abort"}
+{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"aborted"}}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"agent_settled"}

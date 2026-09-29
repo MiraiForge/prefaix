@@ -128,3 +128,25 @@ describe("logger", () => {
     expect(logLevelFromEnv(env)).toBe(level);
   });
 });
+
+describe("logger defaults", () => {
+  it("writes to stderr and stamps the current time when nothing is given", () => {
+    const written: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    // The default sinks to stderr; capturing it proves the fallback is wired.
+    process.stderr.write = ((chunk: string) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const at = new Date("2026-01-02T03:04:05.000Z");
+      const logger = createLogger({ now: () => at });
+      logger.info("hello");
+    } finally {
+      process.stderr.write = original;
+    }
+    expect(written).toHaveLength(1);
+    expect(written[0]).toContain("2026-01-02T03:04:05.000Z");
+    expect(written[0]).toContain("hello");
+  });
+});
