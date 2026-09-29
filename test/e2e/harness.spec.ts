@@ -162,10 +162,11 @@ describe("pty harness", () => {
     "recovers a usable %s prompt after a hard failure",
     async (shell) => {
       const s = await session(shell);
-      // Left visible on purpose: a command that prints nothing leaves the token
-      // sharing a row with the prompt, and the point of the test is that the
-      // shell is still usable afterwards.
-      expect(await s.run("this-command-does-not-exist")).toContain("not found");
+      // A failing command, then the shell still works. The failure's own text
+      // is deliberately not asserted: it is bash-version wording, and the point
+      // of the case is that the session survives, which the exit-status case
+      // covers too.
+      expect(await s.status("this-command-does-not-exist")).toBeGreaterThan(0);
       expect(await s.run("echo still-here")).toBe("still-here");
     },
   );
