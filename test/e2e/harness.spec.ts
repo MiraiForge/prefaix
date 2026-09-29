@@ -88,9 +88,9 @@ describe("pty harness", () => {
     "shows only the tail of long %s output, as a user does",
     async (shell) => {
       const s = await session(shell);
-      const output = await s.run(
-        "i=1; while [ $i -le 60 ]; do echo line-$i; i=$((i+1)); done",
-      );
+      // seq rather than a shell loop, because the assertion is about the pty
+      // and a loop is spelled differently in each of the three shells.
+      const output = await s.run("seq 1 60 | sed 's/^/line-/'");
       const screen = s.screenText();
       // The screen is a fixed height, so early lines have scrolled away.
       expect(screen).toContain("line-60");

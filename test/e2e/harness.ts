@@ -483,14 +483,22 @@ export class ShellSession {
       // Already gone, which is the state close is trying to reach.
     }
     this.#terminal.dispose();
-    // The shell's own history file may still be in flight as it dies, so the
-    // directory is removed with retries rather than failing a teardown.
-    rmSync(this.#dir, {
-      recursive: true,
-      force: true,
-      maxRetries: 10,
-      retryDelay: 50,
-    });
+    // The dying shell may still be writing its history file, so removal is
+    // retried and then given up on. A leaked temp directory is a far smaller
+    // problem than a red suite over teardown.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        rmSync(this.#dir, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 50,
+        });
+        return;
+      } catch {
+        await sleep(100);
+      }
+    }
   }
 }
 
