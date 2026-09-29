@@ -431,7 +431,16 @@ export class ShellSession {
     await this.waitFor(token);
     // Located rather than inferred from the cursor, because a shell may or may
     // not have painted a prompt under the token by the time it is read.
-    return this.#rowsBetween(before, this.#rowOf(token));
+    const end = this.#rowOf(token);
+    if (end === -1) {
+      // The token was seen in the stream but is not on the screen, so the rows
+      // for it are unknowable. Saying so beats returning an empty answer.
+      throw new Error(
+        `the completion token for ${JSON.stringify(command)} is not on the ` +
+          `screen.\n--- screen ---\n${this.screenText()}`,
+      );
+    }
+    return this.#rowsBetween(before, end);
   }
 
   /** The row of the last line whose whole content is `text`, else -1. */
