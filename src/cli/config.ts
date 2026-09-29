@@ -22,17 +22,35 @@ export interface ConfigCheckOptions {
   readonly home?: string;
 }
 
+/**
+ * Reads the config, distinguishing "not there" from "there but unreadable".
+ * A permission error reported as a missing file would print `config ok`
+ * against the defaults, which is the worst possible answer.
+ */
 function defaultReadFile(file: string): string | undefined {
   try {
     return readFileSync(file, "utf8");
-  } catch {
-    return undefined;
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "EISDIR") {
+      return undefined;
+    }
+    throw cause;
   }
 }
 
 export function runConfigCheck(options: ConfigCheckOptions): ExitCode {
   const file = options.file ?? resolvePaths().configFile;
-  const text = (options.readFile ?? defaultReadFile)(file);
+  let text: string | undefined;
+  try {
+    text = (options.readFile ?? defaultReadFile)(file);
+  } catch (cause) {
+    options.err(
+      `${file}: cannot be read (${cause instanceof Error ? cause.message : String(cause)})`,
+    );
+    options.err("Fix the permissions, or delete the file to use the defaults.");
+    return EXIT.agentError;
+  }
   const resolved = resolveConfig({
     text: text ?? "",
     env: options.env ?? {},

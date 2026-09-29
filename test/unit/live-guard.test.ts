@@ -54,6 +54,32 @@ describe("live guard", () => {
     ).toThrow(/not allowed/);
   });
 
+  it("refuses a refused vendor anywhere in a router-qualified slug", () => {
+    // The prefix check alone would pass this, because it starts with
+    // "openrouter", and pi would then be asked for a refused vendor.
+    for (const slug of [
+      "openrouter/anthropic/claude-sonnet-5",
+      "some-router/openai/gpt-5",
+      "gateway/openai-codex/o3",
+    ]) {
+      expect(() =>
+        assertLiveAllowed({
+          PREFAIX_LIVE_PROVIDER: "openrouter",
+          PREFAIX_LIVE_MODEL: slug,
+        }),
+      ).toThrow(/not allowed/);
+    }
+  });
+
+  it("still allows an allowed model through a router", () => {
+    expect(
+      assertLiveAllowed({
+        PREFAIX_LIVE_PROVIDER: "openrouter",
+        PREFAIX_LIVE_MODEL: "openrouter/google/gemini-3.8-flash",
+      }).model,
+    ).toBe("openrouter/google/gemini-3.8-flash");
+  });
+
   it("refuses a model with no vendor, which would fall back to the default", () => {
     expect(() =>
       assertLiveAllowed({ ...allowed, PREFAIX_LIVE_MODEL: "gemini-3.8-flash" }),

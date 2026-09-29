@@ -65,9 +65,13 @@ export function assertLiveAllowed(env: Env = process.env): LiveRequest {
     refuse(`${LIVE_ENV.provider} ${JSON.stringify(named)} is not allowed`);
   }
   const loweredModel = slug.toLowerCase();
-  if (
-    REFUSED_MODEL_PREFIXES.some((prefix) => loweredModel.startsWith(prefix))
-  ) {
+  // Checked per segment, so a router-qualified slug cannot smuggle a refused
+  // vendor past the check: openrouter/anthropic/claude starts with "openrouter".
+  const segments = loweredModel.split("/");
+  const vendor = REFUSED_MODEL_PREFIXES.map((prefix) =>
+    prefix.replace("/", ""),
+  );
+  if (segments.some((segment) => vendor.includes(segment))) {
     refuse(`model ${JSON.stringify(slug)} is not allowed`);
   }
   // A model slug with no vendor is ambiguous; pi would fall back to whatever

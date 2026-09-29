@@ -127,3 +127,28 @@ describe("config check reads a real file", () => {
     expect(out[0]).toContain(join(".config", "prefaix", "config.toml"));
   });
 });
+
+describe("config check reports a file it cannot read", () => {
+  it("fails rather than reporting the defaults as ok", () => {
+    const err: string[] = [];
+    const code = runConfigCheck({
+      out: () => {},
+      err: (line) => err.push(line),
+      file: "/dev/null/nope",
+    });
+    expect(code).toBe(EXIT.agentError);
+    expect(err.join("\n")).toContain("cannot be read");
+  });
+
+  it("treats a directory as no file at all", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pfx-check-"));
+    const out: string[] = [];
+    expect(
+      runConfigCheck({
+        out: (line) => out.push(line),
+        err: () => {},
+        file: dir,
+      }),
+    ).toBe(EXIT.ok);
+  });
+});
