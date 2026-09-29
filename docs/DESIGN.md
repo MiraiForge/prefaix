@@ -576,14 +576,23 @@ Type definitions are imported **type-only** from a pinned dev dependency on `@ea
 | `tool_execution_start` | `tool_start` with an adapter-built `summary`: `bash` → `$ <first line>`, `read` → path, `edit`/`write` → path, `grep`/`find` → pattern, unknown → the name plus the first string arg |
 | `tool_execution_update` | `tool_update` (last line of `partialResult`, throttled to 10 Hz) |
 | `tool_execution_end` | `tool_end {ok: !isError}` (+ `+x −y` for edits when derivable from `details`) |
-| `message_update.usage`, `message_end` | `usage` (cumulative), with `get_session_stats` on settle for cost and context % |
-| `auto_retry_start` / `_end` | `retry` / notice on final failure |
-| `compaction_start` / `_end` | `compaction` |
+| `message_update.usage` (cumulative, on every delta) | `usage`, with `get_session_stats` on settle for cost and context % |
+| `auto_retry_start` / `_end` | `retry` (`maxAttempts` → `max`, `errorMessage` → `reason`) / notice on final failure |
+| `compaction_start` / `_end` | `compaction` (`aborted` + `willRetry` derive `ok`) |
 | `extension_ui_request` (dialog) | `ui_request`; the reply goes back as `extension_ui_response` |
 | `extension_ui_request` (`notify` / `setStatus` / `setWidget` / `setTitle` / `set_editor_text`) | `notice` / `status` / (ignored or info) / (title) / `set_buffer` |
 | `extension_error` | `notice {level:"warn"}` |
 | `agent_end {willRetry}` | Nothing, because more work may follow. |
 | **`agent_settled`** | `settled`, with `stopReason` from the last assistant `message_end` |
+
+**Measured, see [spikes/S1](spikes/S1-pi-rpc-lifecycle.md):** the protocol is
+not JSON-RPC 2.0. A request is `{id, type, …}` with the command name in `type`,
+a reply is `{id, type: "response", command, success, data | error}`, and
+failures carry a flat error *string* with no code. Records with no `id` are
+events. Readiness is the first successful `get_state`, but pi intermittently
+blocks at startup with no output at all, so ready is a wait with a deadline.
+Closing stdin exits 0, SIGTERM exits 143, and SIGKILL writes nothing, so the
+transport has to synthesize that failure.
 
 #### 4.5.4 Bridge extension (`pi-bridge.js`, shipped inside the package)
 
@@ -697,6 +706,32 @@ max_diff_bytes = 100000
 ```
 
 Environment overrides use the key path, for example `PREFAIX_AGENT_PI_BIN`, `PREFAIX_UI_THINKING`, and `PREFAIX_PLAIN=1`. `prefaix config check` validates the file with precise errors.
+
+The loader rules behind those overrides:
+
+- **Every key is optional**, and an unknown key is an error rather than a silent
+  no-op, so a typo such as `max_childern` is caught instead of ignored. A file
+  that cannot be parsed, or a key with a bad value, falls back to the default for
+  that key only; the rest of the file still applies.
+- **The env name is the key path in upper snake case**: `agent.pi.session_dir` →
+  `PREFAIX_AGENT_PI_SESSION_DIR`. `PREFAIX_BACKEND` is an accepted alias for
+  `agent.backend`; when both are set, the key path wins.
+- **An env value is always a string**, parsed back into the field's type:
+  booleans take `1/true/yes/on` and `0/false/no/off`, numbers are parsed strictly,
+  and lists are a JSON array of strings (`PREFAIX_ENV_DENY='["PWD","_"]'`).
+- **An empty value means unset** for optional fields and an empty list for lists,
+  which is how a value is cleared from the environment.
+- **Env can change any leaf the file defines or leaves at its default; it cannot
+  introduce a key.** `[personas.plan]` has to exist in the file before
+  `PREFAIX_PERSONAS_PLAN_GUIDELINE` means anything.
+- **A path value expands a leading `~`** and must then be absolute.
+- Vars that are not settings — `PREFAIX_PLAIN`, `PREFAIX_DEBUG`,
+  `PREFAIX_SHELL_ID`, `PREFAIX_LIVE_PROVIDER`, `PREFAIX_LIVE_MODEL` — are ignored
+  here and read by the component that owns them.
+
+`prefaix config check` reports every problem as `file:line:column: key: message`
+with the offending line and a caret, names the env var for a bad override, and
+lists the settings that are not at their defaults together with their source.
 
 ---
 
@@ -840,9 +875,96 @@ One `AgentPort` contract suite (stream, tools, ui dialog round-trip, abort mid-t
 
 A **no-model live smoke** runs whenever `pi` is on PATH, including in CI if installed: spawn, `get_state`, `get_commands`, `get_available_models`, `new_session`, abort-while-idle, and shutdown. It spends zero tokens and catches RPC drift on pi upgrades.
 
+The suite is a function over a **target**, so a new adapter inherits it:
+
+| Piece | What it is |
+|---|---|
+| `test/contract/suite.ts` | The contract: the cases, the turn invariants, and the assertions. Knows no backend. |
+| `test/contract/fake-target.ts` | Maps each case to the fake scenario that plays it, with a gate in place of the fake's pacing |
+| `test/contract/fake.test.ts` | Runs the suite against the fake |
+| `test/contract/pi-fixture.test.ts` | Runs it against PiAdapter replaying `test/fixtures/pi/*.jsonl` (lands with M2-4/M2-5) |
+
+A target supplies `probe`, `open`, and `start(case)`, where a turn exposes its
+events, an `until(match)` that resolves on the first matching event, and a
+`stop(via)` that ends the turn through the signal, `session.abort()`, or both.
+The cases are `stream`, `tools`, `dialog`, `error`, `retry`, `abortDuringTool`,
+`abortFromSignal`, and `abortFromMethod`, plus capability-gated checks for
+models, thinking levels, commands, and compaction. A case a target cannot play
+is declared in `unsupported` with a reason and reported as skipped, never
+silently absent.
+
+The invariants every turn must hold: exactly one `settled`, last, with nothing
+after it; at most one `turn_start`, first; no `text_delta` for a block past its
+`text_end`; a `tool_update` or `tool_end` only after its `tool_start`, with
+unique ids and a non-empty summary; `usage` cumulative and non-decreasing;
+retries counting from 1 within their own ceiling; a `select` with options.
+
+`test/contract/suite.test.ts` runs the same suite against a deliberately broken
+target through `it.fails`, so the suite is known to fail when a backend breaks
+the port, and exercises each invariant against a violating turn.
+
+#### The fake backend's scenarios
+
+`src/agents/fake/` is selected with `PREFAIX_BACKEND=fake`, and the turn it
+plays comes from `PREFAIX_FAKE_SCENARIO`:
+
+| Scenario | What it covers |
+|---|---|
+| `hello` | Text streaming in two deltas, then `stop` |
+| `tools` | Three tool calls with adapter-built summaries, one failing |
+| `long` | 120 streamed lines, long enough to abort by hand |
+| `dialog` | A `select` request, the round trip, and the answer in the stream |
+| `error` | A notice and `settled {stopReason: "error"}` |
+| `retry` | Two `retry` events, then a successful turn |
+| `buffer` | A `set_buffer` for the edit class, never executed |
+
+The rules the fake keeps, so the contract suite can assert them on any backend:
+
+- **Exactly one `settled` per turn**, including aborts and errors, and the turn
+  stops there. A script may declare its own `settled`, and the fake appends one
+  only if the script did not.
+- **Abort is honoured at every step boundary**, from either the `prompt` signal
+  or `session.abort()`, and also while a turn is parked on a dialog.
+- **Only a completed turn joins the conversation.** An aborted or failed turn
+  records nothing, and a block that never reached `text_end` is not an answer,
+  so `lastAssistantText()` stays empty.
+- **A resumed session keeps its transcript**, so a second turn in the same
+  conversation continues rather than starting over.
+- **Timing is not scripted.** The fake paces itself one tick between steps
+  (12 ms by default) and a test injects a gate instead, so abort ordering is
+  deterministic. A `retry` event's `delayMs` is advertised, not waited on.
+
 ### 12.3 Shell end-to-end
 
-The harness is `node-pty` running the real shell (`zsh -f` / `fish --no-config` / `bash --norc`, then the plugin) inside an `@xterm/headless` terminal at 100×30. It sends keys, waits for screen conditions, and asserts on the **rendered screen** plus side effects (history, variables, directives, prompt refresh). The backend is `PREFAIX_BACKEND=fake` with a named scenario.
+The harness is `node-pty` running the real shell inside an `@xterm/headless`
+terminal at 100×30. It sends keys, waits for screen conditions, and asserts on
+the **rendered screen** plus side effects (history, variables, directives, prompt
+refresh). The backend is `PREFAIX_BACKEND=fake` with a named scenario.
+
+`test/e2e/harness.ts` is that harness, and `test/e2e/harness.spec.ts` proves the
+harness itself before any prefaix gate depends on it. What it takes from that
+work:
+
+- **Each shell starts with no configuration of its own and exactly one file the
+  harness writes**, which is where the plugin loads: `ZDOTDIR` for zsh,
+  `--rcfile` for bash, `--no-config --init-command` for fish.
+- **A prompt is matched by position, not by text.** A trimmed screen never
+  contains `"__pfx "`, and a prompt that is already on screen satisfies a naive
+  wait before the command runs. Every wait for a returning prompt requires one
+  *below* the row the shell was left on.
+- **The terminal answers the shell's capability queries.** A shell that gets no
+  reply can give up; answering is part of emulating a terminal.
+- **A shell that cannot be driven is detected and reported, not failed.**
+  `probeShell` runs at suite start and each unavailable shell is skipped with its
+  reason printed in the run. fish 4.9.3 queries the terminal at startup and exits
+  without a reply in exactly the shape it wants, on this machine and under
+  Python's `pty` as well as node-pty, so the fish gates cannot run here yet. zsh
+  and bash are fully covered.
+- **A tab arrives on the screen as spaces to the next tab stop**, so assertions
+  are made against what a user sees, not the bytes the shell wrote.
+- `node-pty`'s prebuilt `spawn-helper` ships without its executable bit and its
+  own install scripts do not restore it, so the harness fixes it before spawning;
+  otherwise every spawn fails with a bare `posix_spawnp failed`.
 
 The same scenario list runs for every shell. This is the release gate:
 

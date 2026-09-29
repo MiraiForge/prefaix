@@ -41,6 +41,14 @@ bundling, Vitest for tests, and ESLint with Prettier. For code changes, run
 tests. If a required script is not implemented yet, report that limitation rather
 than claiming a passing check. Default to FakeAgent and recorded-fixture tests.
 
+**Coverage target: 95% or better on statements, branches, functions, and lines.**
+`bun run coverage` enforces it through `coverage.thresholds` in
+`vitest.config.ts`, and CI runs it as its own step, so a change that is not tested
+fails the build rather than quietly lowering the bar. `bun run test` stays fast and
+measures nothing. Test scripts that throw are not a substitute: the contract suite
+in `test/contract/` is run through `it.fails` against a deliberately broken
+backend, so a passing contract is known to mean something.
+
 ### Live-model cost guard
 
 Never bill Anthropic or OpenAI models in development tests, spikes, or fixture
