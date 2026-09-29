@@ -102,9 +102,10 @@ export function resolveShellBin(shell: ShellKind): string {
 const SHELLS: Record<ShellKind, ShellSpec> = {
   zsh: {
     bin: "",
-    // ZDOTDIR replaces the user's config rather than disabling rc entirely, so
-    // the harness's own file is read and nothing of the user's is.
-    args: () => ["-i"],
+    // -d skips the system rc files, which on a package-installed zsh run
+    // compinit and can ask the user a question the harness never answers, while
+    // ZDOTDIR still supplies the harness's own rc.
+    args: () => ["-d", "-i"],
     env: () => ({}),
     rcSource: ".zshrc",
   },

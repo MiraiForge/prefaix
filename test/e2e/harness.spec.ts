@@ -175,7 +175,8 @@ describe("pty harness", () => {
   });
 
   it("reports a timeout with the screen that caused it", async () => {
-    const s = await session("zsh");
+    // Whichever shell this machine can drive, since the point is the timeout.
+    const s = await session(usable[0] ?? "bash");
     await expect(
       s.waitFor("this-will-never-appear", { timeoutMs: 500 }),
     ).rejects.toThrow(/timed out waiting for/);
@@ -186,14 +187,17 @@ describe("pty harness", () => {
   });
 
   it("closing twice is a no-op, and leaves nothing running", async () => {
-    const s = await session("bash");
+    const s = await session(usable[0] ?? "bash");
     await s.close();
     await expect(s.close()).resolves.toBeUndefined();
     expect(() => s.send("echo nope")).toThrow(/closed/);
   });
 
-  it("runs a startup script, which is where a plugin would load", async () => {
-    const s = await session("zsh", { initScript: "pfx_loaded=yes" });
-    expect(await s.readVariable("pfx_loaded")).toBe("yes");
-  });
+  it.each(usable)(
+    "runs a startup script in %s, which is where a plugin would load",
+    async (shell) => {
+      const s = await session(shell, { initScript: "pfx_loaded=yes" });
+      expect(await s.readVariable("pfx_loaded")).toBe("yes");
+    },
+  );
 });
