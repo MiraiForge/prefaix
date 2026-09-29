@@ -206,6 +206,7 @@ export class ShellSession {
   readonly #timeoutMs: number;
   #closed = false;
   #output = "";
+  #tokens = 0;
 
   private constructor(
     terminal: HeadlessTerminal,
@@ -285,6 +286,10 @@ export class ShellSession {
       }
     });
     try {
+      // Readiness waits for the prompt, which is the one thing a shell paints
+      // before it will read anything. Sending a probe instead would race the
+      // shell's own first read and the two would land on one line. Completion,
+      // where the shells differ, uses a token instead.
       await session.waitForPrompt({ timeoutMs: options.timeoutMs ?? 8_000 });
     } catch {
       const raw = session.raw();
@@ -358,6 +363,15 @@ export class ShellSession {
     );
   }
 
+  /**
+   * A token the harness prints itself, used to know a command finished. A
+   * prompt is not a reliable signal: each shell repaints it differently, and
+   * asking "is there a new prompt below" couples the harness to that.
+   */
+  #nextToken(): string {
+    return `${PROMPT}_done_${String(++this.#tokens)}`;
+  }
+
   async waitForPrompt(
     options: { timeoutMs?: number; afterRow?: number } = {},
   ): Promise<void> {
@@ -412,11 +426,34 @@ export class ShellSession {
    */
   async run(command: string): Promise<string> {
     const before = this.#cursorRow();
-    this.sendLine(command);
-    // A prompt below the one we left, so an empty command cannot pass for a
-    // command that ran.
-    await this.waitForPrompt({ afterRow: this.#promptRow() });
-    return this.#rowsBetween(before, this.#cursorRow());
+    const token = this.#nextToken();
+    this.sendLine(`${command}; printf '${token}\\n'`);
+    await this.waitFor(token);
+    // Located rather than inferred from the cursor, because a shell may or may
+    // not have painted a prompt under the token by the time it is read.
+    return this.#rowsBetween(before, this.#rowOf(token));
+  }
+
+  /** The row of the last line whose whole content is `text`, else -1. */
+  #rowOf(text: string): number {
+    const buffer = this.#terminal.buffer.active;
+    for (let row = buffer.baseY + buffer.cursorY; row >= 0; row--) {
+      if (this.#rowText(row).trim() === text) {
+        return row;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * Waits for a prompt after typing, using a token rather than the prompt, so
+   * a shell that repaints its prompt mid-turn cannot stall the wait.
+   */
+  async waitForTypedLine(typed: string): Promise<string> {
+    const token = this.#nextToken();
+    this.send(`${typed}; printf '${token}\\n'`);
+    await this.waitFor(token);
+    return this.#rowsBetween(-1, this.#rowOf(token));
   }
 
   #cursorRow(): number {
