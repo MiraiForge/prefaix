@@ -141,7 +141,11 @@ describe("pty harness", () => {
       // A tab is expanded to the next tab stop, which is what a user sees on
       // a real terminal, so the screen is the assertion rather than the bytes.
       expect(await s.run("printf 'a\\tb\\n'")).toBe("a       b");
-      await s.waitForTypedLine("printf '\\033[31mred\\033[0m\\n'");
+      // A colour escape is consumed by the terminal, so the completion signal
+      // is the prompt returning rather than a marker the command would print.
+      const before = s.promptRow();
+      s.sendLine("printf '\\033[31mred\\033[0m\\n'");
+      await s.waitForPrompt({ afterRow: before });
       // The colour is consumed by the terminal, leaving readable text.
       expect(s.screenText()).toContain("red");
     },
@@ -149,12 +153,13 @@ describe("pty harness", () => {
 
   it.each(usable)("accepts keystrokes one at a time in %s", async (shell) => {
     const s = await session(shell);
+    const before = s.promptRow();
     for (const character of "echo typed".split("")) {
       s.send(character);
     }
-    // A token the command itself prints, so completion does not depend on how
-    // this shell repaints its prompt.
-    await s.waitForTypedLine("echo typed");
+    s.send("\r");
+    // A new prompt, not the one that was already there.
+    await s.waitForPrompt({ afterRow: before });
     expect(s.screenText()).toContain("typed");
   });
 

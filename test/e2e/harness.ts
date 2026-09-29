@@ -424,11 +424,30 @@ export class ShellSession {
    * and the prompt removed. Rows are located by position rather than by
    * matching text, so trailing spaces in a prompt cannot break it.
    */
+  /**
+   * Waits for a row that is exactly the token.
+   *
+   * Not a substring match on the screen: the shell echoes the command we typed,
+   * and the token is in that echoed text, so a substring wait is satisfied by
+   * the echo before the command has run at all. The real token is printed by
+   * printf with a trailing newline, so it always lands alone on its own row.
+   */
+  async #waitForTokenRow(
+    token: string,
+    options: { timeoutMs?: number } = {},
+  ): Promise<void> {
+    await this.#waitFor(
+      () => this.#rowOf(token) !== -1,
+      `${token} on a row of its own`,
+      options,
+    );
+  }
+
   async run(command: string): Promise<string> {
     const before = this.#cursorRow();
     const token = this.#nextToken();
     this.sendLine(`${command}; printf '${token}\\n'`);
-    await this.waitFor(token);
+    await this.#waitForTokenRow(token);
     // Located rather than inferred from the cursor, because a shell may or may
     // not have painted a prompt under the token by the time it is read.
     const end = this.#rowOf(token);
@@ -457,25 +476,15 @@ export class ShellSession {
    * equality, because a command that prints nothing puts the token on the same
    * row as the prompt.
    */
+  /** The row whose whole content is `text`, searching up from the cursor. */
   #rowOf(text: string): number {
     const buffer = this.#terminal.buffer.active;
     for (let row = buffer.baseY + buffer.cursorY; row >= 0; row--) {
-      if (this.#rowText(row).includes(text)) {
+      if (this.#rowText(row).trim() === text) {
         return row;
       }
     }
     return -1;
-  }
-
-  /**
-   * Waits for a prompt after typing, using a token rather than the prompt, so
-   * a shell that repaints its prompt mid-turn cannot stall the wait.
-   */
-  async waitForTypedLine(typed: string): Promise<string> {
-    const token = this.#nextToken();
-    this.send(`${typed}; printf '${token}\\n'`);
-    await this.waitFor(token);
-    return this.#rowsBetween(-1, this.#rowOf(token));
   }
 
   #cursorRow(): number {
@@ -487,14 +496,6 @@ export class ShellSession {
     return (
       this.#terminal.buffer.active.getLine(row)?.translateToString(true) ?? ""
     );
-  }
-
-  #rowsBetween(from: number, to: number): string {
-    const out: string[] = [];
-    for (let row = from + 1; row < to; row++) {
-      out.push(this.#rowText(row));
-    }
-    return out.join("\n").trim();
   }
 
   /**
