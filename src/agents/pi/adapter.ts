@@ -53,7 +53,11 @@ const PI_CAPABILITIES: Capabilities = {
   skills: true,
   uiDialogs: true,
   contextSections: true,
-  personasWithoutRespawn: true,
+  // A persona is applied by the spawn arguments, so a change made after open is
+  // only recorded locally. M2-7's bridge makes a live switch real; until then
+  // claiming it would leave a caller believing a read-only persona is active
+  // while pi still has the original tools.
+  personasWithoutRespawn: false,
   handoffTui: true,
 };
 
@@ -139,8 +143,9 @@ export function buildSpawnPlan(
 
 export class PiSession implements AgentSession {
   readonly native: NativeRef;
+  readonly #bin: string;
+  readonly #root: string;
   readonly #rpc: PiRpc;
-  readonly #options: PiAdapterOptions;
   readonly #mapperOptions: MapperOptions;
   #busy = false;
   #turnAbort: AbortController | undefined;
@@ -148,10 +153,18 @@ export class PiSession implements AgentSession {
   // The mapper of the running turn, which knows pi's own id for each dialog.
   #mapper: TurnMapper | undefined;
 
-  constructor(rpc: PiRpc, native: NativeRef, options: PiAdapterOptions) {
+  constructor(
+    rpc: PiRpc,
+    native: NativeRef,
+    options: PiAdapterOptions,
+    origin: { readonly bin: string; readonly root: string },
+  ) {
     this.#rpc = rpc;
     this.native = native;
-    this.#options = options;
+    this.#bin = origin.bin;
+    // An empty root is not a directory, so it is normalised once here rather
+    // than at every use.
+    this.#root = origin.root === "" ? "." : origin.root;
     this.#mapperOptions = options.mapper ?? {};
   }
 
@@ -198,6 +211,14 @@ export class PiSession implements AgentSession {
         return;
       }
 
+      // Whatever pi wrote before its first reply is startup output, not an
+      // abandoned turn, so it is mapped into this turn rather than discarded.
+      for (const record of this.#rpc.takeStartupRecords()) {
+        for (const event of mapper.map(record)) {
+          yield event;
+        }
+      }
+
       const message = this.#compose(input);
       await this.#rpc.request("prompt", { message });
 
@@ -212,7 +233,9 @@ export class PiSession implements AgentSession {
         const step = await raceAbort(iterator.next(), turn);
         if (step === ABORTED) {
           // The user pressed Esc: give the prompt back now rather than waiting
-          // on a settle this build cannot prove arrives.
+          // on a settle this build cannot prove arrives. The abandoned read is
+          // cancelled first, or it would swallow the next turn's first record.
+          await iterator.return?.();
           yield mapper.settle("aborted");
           return;
         }
@@ -252,15 +275,11 @@ export class PiSession implements AgentSession {
   }
 
   #compose(input: PromptInput): string {
-    // The bridge carries context out of band, so the visible message stays
-    // exactly what the user typed. Without the bridge the context is prepended
-    // as a compact block, which is the documented fallback.
-    if (
-      this.#options.bridgePath !== undefined &&
-      this.#options.bridgePath !== ""
-    ) {
-      return input.text;
-    }
+    // Context is always included here. The bridge is meant to carry it out of
+    // band so the visible message stays exactly what the user typed, but until
+    // the bridge can actually read the turn context, dropping this block would
+    // silently remove cwd, recent commands, the terminal, and the persona from
+    // every request. M2-7 takes this over once it writes the turn file.
     return `${contextBlock(input)}\n\n${input.text}`;
   }
 
@@ -269,8 +288,12 @@ export class PiSession implements AgentSession {
   }
 
   async abort(): Promise<void> {
+    // The local turn is released first. If pi is alive but unresponsive, waiting
+    // on its replies would hold the user's prompt for the sum of both timeouts.
+    this.#turnAbort?.abort();
     // Queued text is restored into the buffer rather than dropped, so the
-    // user's half-typed text survives the abort.
+    // user's half-typed text survives the abort. This is best effort, and must
+    // not delay the release above.
     const cleared = await this.#rpc
       .request("clear_queue")
       .catch(() => undefined);
@@ -284,7 +307,6 @@ export class PiSession implements AgentSession {
       this.#onQueuedText?.(queued.join(" "));
     }
     await this.#rpc.request("abort").catch(() => undefined);
-    this.#turnAbort?.abort();
   }
 
   // Set by the adapter so an abort can hand queued text back to the shell.
@@ -422,7 +444,12 @@ export class PiSession implements AgentSession {
         { hint: "Run one turn first." },
       );
     }
-    return { argv: ["pi", "--session", file], cwd: "." };
+    return {
+      argv: [this.#bin, "--session", file],
+      // The conversation's own root, not the daemon's working directory, or the
+      // TUI opens the wrong repository.
+      cwd: this.#root,
+    };
   }
 
   async close(): Promise<void> {
@@ -566,7 +593,12 @@ export class PiAdapter implements AgentBackend {
         ? {}
         : { sessionFile: opts.resume.sessionFile }),
     };
-    const session = new PiSession(rpc, native, this.#options);
+    const session = new PiSession(rpc, native, this.#options, {
+      // The binary the child actually ran under, which a transport override
+      // may have changed, so a handoff launches the same pi.
+      bin: this.#options.rpc?.bin ?? plan.bin,
+      root: opts.root,
+    });
     this.#sessions.add(session);
     try {
       await session.ready();
