@@ -1,0 +1,13 @@
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}}
+{"type":"message_update","usage":{"input":42,"output":0,"cacheRead":0,"cacheWrite":0,"cost":{"input":0,"output":0}},"assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","usage":{"input":42,"output":5,"cacheRead":0,"cacheWrite":0,"cost":{"input":0,"output":0}},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Reading the config "}}
+{"delay":400}
+{"type":"message_update","usage":{"input":42,"output":11,"cacheRead":0,"cacheWrite":0,"cost":{"input":0,"output":0}},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"loader now.\n"}}
+{"type":"message_update","usage":{"input":42,"output":11,"cacheRead":0,"cacheWrite":0,"cost":{"input":0,"output":0}},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"Reading the config loader now.\n"}}
+{"type":"message_update","usage":{"input":42,"output":11,"cacheRead":0,"cacheWrite":0,"cost":{"input":0,"output":0}},"assistantMessageEvent":{"type":"done","reason":"stop"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Reading the config loader now.\n"}],"stopReason":"stop","usage":{"input":42,"output":11,"cacheRead":0,"cacheWrite":0,"cost":{"input":0.0000063,"output":0.0000066}}}}
+{"type":"turn_end","message":{"role":"assistant","stopReason":"stop"},"toolResults":[]}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"agent_settled"}

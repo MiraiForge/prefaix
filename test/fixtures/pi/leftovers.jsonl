@@ -1,0 +1,9 @@
+{"eager":true,"type":"agent_settled"}
+{"eager":true,"type":"text_delta","contentIndex":0,"delta":"stale"}
+{"type":"agent_start"}
+{"type":"message_start","message":{"role":"assistant","content":[],"stopReason":"pending"}}
+{"type":"message_update","usage":{"input":10,"output":0},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"fresh"}}
+{"type":"message_update","usage":{"input":10,"output":5},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"fresh"}}
+{"type":"message_update","usage":{"input":10,"output":5},"assistantMessageEvent":{"type":"done","reason":"stop"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"fresh"}],"stopReason":"stop"}}
+{"type":"agent_settled"}
