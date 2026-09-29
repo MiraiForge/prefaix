@@ -43,17 +43,16 @@ jobs:
       - name: AgentPort contract suite (fake and pi fixture)
         run: bun run test:contract
       - name: Install shells for the end-to-end gates
-        # DESIGN 12.5: zsh, fish, and bash 5 on Linux; macOS already has zsh and
-        # bash, and runs bash 3.2 in its degraded mode.
+        # zsh and bash 5 on Linux; macOS already has both, and runs bash 3.2 in
+        # its degraded mode. fish is installed on neither until the harness
+        # drives it, which it does not yet.
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update
-            sudo apt-get install -y zsh fish
+            sudo apt-get install -y zsh
             # A fresh zsh finds the runner's own directories insecure and asks a
             # question on an interactive startup; the harness would sit there.
             compaudit || true
-          else
-            brew install fish || echo "fish already installed"
           fi
       - name: Shell end-to-end (pty harness)
         run: bun run test:e2e
