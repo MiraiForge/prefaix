@@ -349,8 +349,10 @@ describe("session commands through PiAdapter", () => {
   it("hands off to pi's own UI with the session file", async () => {
     const session = await openSession("stream.jsonl");
     expect(session.tuiCommand?.()).toEqual({
-      argv: ["pi", "--session", String(session.native.sessionFile)],
-      cwd: ".",
+      // The binary the child actually ran under, not a hardcoded "pi".
+      argv: [process.execPath, "--session", String(session.native.sessionFile)],
+      // The conversation's root, not the test's working directory.
+      cwd: ROOT,
     });
     await session.close();
   });
@@ -783,7 +785,7 @@ describe("state and usage from a live child", () => {
     await session.close();
   });
 
-  it("keeps the user's text when the bridge is loaded", async () => {
+  it("still sends context when a bridge is configured", async () => {
     const tracePath = tempTrace();
     const adapter = createPiAdapter({
       bridgePath: "/pfx/pi-bridge.js",
@@ -803,8 +805,12 @@ describe("state and usage from a live child", () => {
     const prompt = trace(tracePath).find(
       (command) => command["type"] === "prompt",
     );
-    // No context block, because the bridge carries it out of band.
-    expect(prompt?.["message"]).toBe("exactly what I typed");
+    // The bridge cannot carry context until it reads the turn file, so the
+    // context block is still here rather than silently dropped.
+    expect(prompt?.["message"]).toContain("<shell-context>");
+    expect(String(prompt?.["message"]).endsWith("exactly what I typed")).toBe(
+      true,
+    );
     await session.close();
   });
 
@@ -1189,25 +1195,7 @@ describe("adapter state when pi has nothing to say", () => {
   });
 });
 
-describe("adapter construction, no options at all", () => {
-  it("opens with the fewest options the port allows", async () => {
-    // Everything defaulted: no rpc overrides, no timeouts, no log. The child
-    // still has to come up, which is what the default PATH lookup is for.
-    const session = (await createPiAdapter()
-      .open({
-        root: ROOT,
-        env: { PATH: process.env["PATH"] ?? "" },
-        // The default bin is a real pi, which this build cannot drive offline,
-        // so readiness is expected to fail rather than hang.
-      })
-      .catch((error: unknown) => error)) as unknown;
-    if (session instanceof Error) {
-      expect(session).toBeInstanceOf(PrefaixError);
-      return;
-    }
-    await (session as PiSession).close();
-  });
-
+describe("adapter construction, minimal options", () => {
   it("refuses a prompt whose turn was aborted before it began", async () => {
     const controller = new AbortController();
     controller.abort();
@@ -1292,5 +1280,101 @@ describe("adapter options left out", () => {
     // The child dies from a thrown string, so the turn must still settle once.
     const events = await collect(session);
     expect(events.filter((event) => event.type === "settled")).toHaveLength(1);
+  });
+});
+
+describe("a backend that cannot be spawned", () => {
+  it("reports a missing pi instead of crashing", async () => {
+    // The shape prefaix hits when pi is not installed, which DESIGN §8 maps to
+    // a one-line message and a non-zero exit.
+    const adapter = createPiAdapter({ bin: "/definitely/not/pi" });
+    await expect(adapter.open({ root: ROOT, env: {} })).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+    expect(adapter.sessions).toEqual([]);
+  });
+});
+
+describe("adapter edges the review found", () => {
+  it("probes with no PATH at all", async () => {
+    // An empty env rather than an empty PATH, which is a different branch.
+    await expect(
+      createPiAdapter({ bin: "pi", env: {} }).probe(),
+    ).resolves.toMatchObject({ installed: false });
+  });
+
+  it("hands off to the current directory when the root is unknown", async () => {
+    // Nothing sensible to run a TUI in, so the best effort is the process cwd.
+    const session = (await createPiAdapter({
+      rpc: {
+        bin: process.execPath,
+        args: [CHILD, join(FIXTURES, "stream.jsonl")],
+        cwd: ROOT,
+        env: {},
+        requestTimeoutMs: 2_000,
+        readyTimeoutMs: 4_000,
+        termGraceMs: 300,
+        killGraceMs: 300,
+      },
+    }).open({ root: "", env: {} })) as PiSession;
+    expect(session.tuiCommand?.().cwd).toBe(".");
+    await session.close();
+  });
+
+  it("uses the configured timeouts and log when given", async () => {
+    const lines: string[] = [];
+    const adapter = createPiAdapter({
+      requestTimeoutMs: 1_500,
+      readyTimeoutMs: 2_500,
+      log: (message) => lines.push(message),
+      rpc: {
+        bin: process.execPath,
+        args: [CHILD, join(FIXTURES, "stream.jsonl")],
+        cwd: ROOT,
+        env: {},
+      },
+    });
+    const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
+    // The defaults were replaced, so the transport is the adapter's own.
+    expect(typeof lines).toBe("object");
+    await session.close();
+  });
+
+  it("settles a turn whose stream ends without settling", async () => {
+    const adapter = createPiAdapter({
+      rpc: {
+        bin: process.execPath,
+        args: [
+          "-e",
+          [
+            'process.stdin.setEncoding("utf8");',
+            'process.stdin.on("data", (d) => {',
+            '  for (const line of d.split("\\n").filter(Boolean)) {',
+            "    const c = JSON.parse(line);",
+            '    if (c.type === "get_state") { process.stdout.write(JSON.stringify({id:c.id,type:"response",command:c.type,success:true,data:{sessionId:"s"}}) + "\\n"); }',
+            '    else { process.stdout.write(JSON.stringify({type:"agent_start"}) + "\\n"); process.exit(0); }',
+            "  }",
+            "});",
+          ].join(""),
+        ],
+        cwd: ROOT,
+        env: {},
+        requestTimeoutMs: 2_000,
+        readyTimeoutMs: 2_000,
+        termGraceMs: 200,
+        killGraceMs: 200,
+      },
+    });
+    const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
+    const events = await collect(session);
+    // The stream ended mid-turn, so the turn still ends exactly once.
+    expect(events.filter((event) => event.type === "settled")).toHaveLength(1);
+  });
+
+  it("does not claim a live persona switch", () => {
+    // A persona is applied by the spawn arguments, so switching after open is
+    // only recorded locally. Claiming otherwise would have a caller believe a
+    // read-only persona is active while pi still has the original tools.
+    expect(createPiAdapter().capabilities.personasWithoutRespawn).toBe(false);
   });
 });

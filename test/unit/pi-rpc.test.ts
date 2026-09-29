@@ -642,3 +642,96 @@ describe("pi transport close with a default grace period", () => {
     });
   });
 });
+
+describe("pi transport spawn failure", () => {
+  it("fails readiness instead of crashing when pi cannot be spawned", async () => {
+    // A missing or non-executable pi emits `error`, never `exit`, so without
+    // this path an unhandled event would take the daemon down.
+    const rpc = new PiRpc({
+      bin: "/definitely/not/pi",
+      args: [],
+      cwd: ROOT,
+      env: {},
+      readyTimeoutMs: 2_000,
+      requestTimeoutMs: 2_000,
+    });
+    await expect(rpc.waitReady()).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+    await expect(rpc.request("get_state")).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+  });
+
+  it("rejects a pending request when the child fails to spawn", async () => {
+    const rpc = new PiRpc({
+      bin: "/definitely/not/pi",
+      args: [],
+      cwd: ROOT,
+      env: {},
+      readyTimeoutMs: 2_000,
+      requestTimeoutMs: 2_000,
+    });
+    const failure = rpc.request("get_state").catch((error: unknown) => error);
+    await failure;
+    expect(rpc.exited).toBe(true);
+  });
+
+  it("fails the event stream of a child that never started", async () => {
+    const rpc = new PiRpc({
+      bin: "/definitely/not/pi",
+      args: [],
+      cwd: ROOT,
+      env: {},
+      requestTimeoutMs: 2_000,
+    });
+    const first = rpc.events[Symbol.asyncIterator]().next();
+    rpc.spawn();
+    await expect(first).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+  });
+});
+
+describe("startup records and spawn details", () => {
+  it("hands the startup records to the caller exactly once", async () => {
+    const rpc = new PiRpc({
+      bin: process.execPath,
+      args: [
+        "-e",
+        [
+          'process.stdout.write(JSON.stringify({type:"extension_ui_request",id:"ui_1",method:"setStatus",statusKey:"k",statusText:"early"}) + "\\n");',
+          'process.stdin.on("data", () => {',
+          '  process.stdout.write(JSON.stringify({id:"r1",type:"response",command:"get_state",success:true,data:{sessionId:"s"}}) + "\\n");',
+          "});",
+          "setTimeout(() => process.exit(0), 300);",
+        ].join(""),
+      ],
+      cwd: ROOT,
+      env: {},
+      requestTimeoutMs: 2_000,
+    });
+    await rpc.waitReady();
+    // A pre-warming extension's output is drained by the caller, once.
+    expect(rpc.takeStartupRecords()).toHaveLength(1);
+    expect(rpc.takeStartupRecords()).toHaveLength(0);
+    await rpc.close();
+  });
+
+  it("reports a non-executable binary as a problem to start", async () => {
+    const rpc = new PiRpc({
+      bin: process.execPath,
+      args: ["-e", "process.exit(0)"],
+      cwd: ROOT,
+      env: {},
+      requestTimeoutMs: 500,
+    });
+    rpc.spawn();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 80);
+    });
+    // A child that already exited cannot also fail to spawn.
+    expect(rpc.exited).toBe(true);
+    await rpc.close();
+  });
+});

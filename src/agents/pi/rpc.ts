@@ -34,6 +34,11 @@ export interface PiChild {
   onStdout(listener: (chunk: string) => void): void;
   onStderr(listener: (chunk: string) => void): void;
   onExit(listener: (exit: ChildExit) => void): void;
+  /**
+   * A spawn failure, which is an `error` event rather than an exit: a missing
+   * or non-executable pi never reaches the point of exiting.
+   */
+  onError(listener: (problem: string) => void): void;
 }
 
 export type SpawnChild = (
@@ -62,6 +67,7 @@ function processSpawn(
     stdout?: (chunk: string) => void;
     stderr?: (chunk: string) => void;
     exit?: (exit: ChildExit) => void;
+    error?: (problem: string) => void;
   } = {};
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => handlers.stdout?.(chunk));
@@ -70,6 +76,15 @@ function processSpawn(
   child.on("exit", (code, signal) =>
     handlers.exit?.({ code, signal: signal as NodeJS.Signals | null }),
   );
+  // Without a listener an unspawnable child takes the whole process down, which
+  // for the daemon means a crash on `prefaix run` with no pi installed.
+  child.on("error", (error: NodeJS.ErrnoException) => {
+    handlers.error?.(
+      error.code === "ENOENT"
+        ? "pi was not found on PATH"
+        : `pi could not be started (${error.code ?? error.message})`,
+    );
+  });
   return {
     get pid() {
       return child.pid;
@@ -91,6 +106,9 @@ function processSpawn(
     },
     onExit: (fn) => {
       handlers.exit = fn;
+    },
+    onError: (fn) => {
+      handlers.error = fn;
     },
   };
 }
@@ -160,6 +178,7 @@ export class PiRpc {
   // pi can emit extension_ui_request before the first reply, so those are held
   // until the caller is ready to receive them.
   #preReady: PiRecord[] = [];
+  #startupTaken = false;
   readonly #exitGate = deferred<ChildExit>();
   readonly #options: PiRpcOptions;
   readonly #spawnChild: SpawnChild;
@@ -184,6 +203,19 @@ export class PiRpc {
   /** True once pi answered a command and the session is usable. */
   get ready(): boolean {
     return this.#ready;
+  }
+
+  /**
+   * The records pi wrote before its first reply, drained once. They are
+   * startup output — a notification, a status, a dialog from a pre-warming
+   * extension — and must not be mistaken for leftovers of an abandoned turn.
+   */
+  takeStartupRecords(): readonly PiRecord[] {
+    if (this.#startupTaken) {
+      return [];
+    }
+    this.#startupTaken = true;
+    return this.#preReady;
   }
 
   get requestTimeoutMs(): number {
@@ -211,6 +243,9 @@ export class PiRpc {
     });
     child.onExit((exit) => {
       this.#handleExit(exit);
+    });
+    child.onError((problem) => {
+      this.#handleSpawnFailure(problem);
     });
   }
 
@@ -244,9 +279,7 @@ export class PiRpc {
       ]);
       inspect(state);
       this.#ready = true;
-      const held = this.#preReady;
-      this.#preReady = [];
-      for (const record of held) {
+      for (const record of this.#preReady) {
         this.events.push(record);
       }
     } finally {
@@ -330,6 +363,29 @@ export class PiRpc {
       `pi ${pending.command} failed: ${response.error}`,
     );
     pending.reject(error);
+  }
+
+  // A child that never started has no exit code, so the failure is carried the
+  // same way: every pending request rejects and the turn ends.
+  #handleSpawnFailure(problem: string): void {
+    if (this.#exit !== undefined) {
+      return;
+    }
+    this.#exit = { code: null, signal: null };
+    this.#fail(
+      new PrefaixError("AGENT_UNAVAILABLE", problem, {
+        hint: "Install pi, then run prefaix doctor.",
+      }),
+    );
+  }
+
+  #fail(error: PrefaixError): void {
+    for (const [, pending] of this.#pending) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this.#pending.clear();
+    this.events.fail(error);
   }
 
   #handleExit(exit: ChildExit): void {
