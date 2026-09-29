@@ -440,7 +440,16 @@ export class ShellSession {
           `screen.\n--- screen ---\n${this.screenText()}`,
       );
     }
-    return this.#rowsBetween(before, end);
+    // The token's own row is included, with the token removed, because a
+    // command's stderr and its stdout can land on one line and the row before
+    // it is then not the whole answer.
+    const rows: string[] = [];
+    for (let row = before + 1; row <= end; row++) {
+      rows.push(this.#rowText(row));
+    }
+    const last = rows.length - 1;
+    rows[last] = (rows[last] ?? "").replace(token, "");
+    return rows.join("\n").replace(/\n+$/, "").trim();
   }
 
   /**
