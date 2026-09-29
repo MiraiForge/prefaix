@@ -162,7 +162,10 @@ describe("pty harness", () => {
     "recovers a usable %s prompt after a hard failure",
     async (shell) => {
       const s = await session(shell);
-      await s.run("this-command-does-not-exist-2>/dev/null || true");
+      // Left visible on purpose: a command that prints nothing leaves the token
+      // sharing a row with the prompt, and the point of the test is that the
+      // shell is still usable afterwards.
+      expect(await s.run("this-command-does-not-exist")).toContain("not found");
       expect(await s.run("echo still-here")).toBe("still-here");
     },
   );

@@ -443,11 +443,15 @@ export class ShellSession {
     return this.#rowsBetween(before, end);
   }
 
-  /** The row of the last line whose whole content is `text`, else -1. */
+  /**
+   * The row of the last line containing `text`, else -1. A match rather than an
+   * equality, because a command that prints nothing puts the token on the same
+   * row as the prompt.
+   */
   #rowOf(text: string): number {
     const buffer = this.#terminal.buffer.active;
     for (let row = buffer.baseY + buffer.cursorY; row >= 0; row--) {
-      if (this.#rowText(row).trim() === text) {
+      if (this.#rowText(row).includes(text)) {
         return row;
       }
     }
