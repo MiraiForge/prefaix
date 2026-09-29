@@ -12,19 +12,29 @@
   "scripts": {
     "build": "tsup",
     "check": "bun run lint && bun run typecheck && bun run test",
+    "coverage": "vitest run --coverage",
     "check:private": "node scripts/check-private.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0 && bun run format:check",
     "test": "vitest run",
+    "test:contract": "vitest run test/contract",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:unit": "vitest run test/unit",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "smol-toml": "^1.9.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "22.20.4",
+    "@vitest/coverage-v8": "5.0.1",
+    "@xterm/headless": "6.0.0",
     "eslint": "10.11.0",
     "eslint-config-prettier": "10.1.8",
     "globals": "17.12.0",
+    "node-pty": "1.1.0",
     "prettier": "3.9.9",
     "tsup": "8.5.1",
     "typescript": "6.0.3",
