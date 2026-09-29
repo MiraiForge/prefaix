@@ -28,7 +28,11 @@ import {
 } from "./types.js";
 import { toolEndSummary, toolPreview, toolSummary } from "./tool-summaries.js";
 
-const UI_KINDS: Readonly<Record<string, UiRequestKind>> = {
+type DialogMethod = "select" | "confirm" | "input" | "editor";
+
+// Total over the four dialog kinds, so the lookup cannot be undefined and the
+// port's kind is never invented.
+const UI_KINDS: Readonly<Record<DialogMethod, UiRequestKind>> = {
   select: "select",
   confirm: "confirm",
   input: "input",
@@ -472,7 +476,7 @@ export class TurnMapper {
           {
             type: "ui_request",
             id,
-            kind: UI_KINDS[method] ?? "input",
+            kind: UI_KINDS[method as DialogMethod],
             title: title === "" ? method : title,
             ...(textOf(fields["message"]) === ""
               ? {}

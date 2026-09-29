@@ -91,8 +91,7 @@ export function toolSummary(toolName: string, args: unknown): string {
 export function toolPreview(partialResult: unknown): string | undefined {
   const text = (() => {
     if (typeof partialResult === "string") {
-      const last = partialResult.trimEnd().split("\n").at(-1) ?? "";
-      return last.trim();
+      return partialResult.trimEnd().split("\n").at(-1)?.trim() ?? "";
     }
     if (typeof partialResult === "object" && partialResult !== null) {
       const record = partialResult as Record<string, unknown>;

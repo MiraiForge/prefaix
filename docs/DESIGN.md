@@ -710,9 +710,11 @@ Environment overrides use the key path, for example `PREFAIX_AGENT_PI_BIN`, `PRE
 The loader rules behind those overrides:
 
 - **Every key is optional**, and an unknown key is an error rather than a silent
-  no-op, so a typo such as `max_childern` is caught instead of ignored. A file
-  that cannot be parsed, or a key with a bad value, falls back to the default for
-  that key only; the rest of the file still applies.
+  no-op, so a typo such as `max_childern` is caught instead of ignored. A key
+  with a bad value falls back to the default for that key only, and the rest of
+  the file still applies. A file that cannot be **parsed** is different: the
+  parser fails as a whole, so every key falls back to its default and the syntax
+  error is the only diagnostic reported.
 - **The env name is the key path in upper snake case**: `agent.pi.session_dir` →
   `PREFAIX_AGENT_PI_SESSION_DIR`. `PREFAIX_BACKEND` is an accepted alias for
   `agent.backend`; when both are set, the key path wins.
