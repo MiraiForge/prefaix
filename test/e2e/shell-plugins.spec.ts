@@ -110,6 +110,7 @@ for (const shell of TEST_SHELLS)
       const line = ": hello it's $(touch unsafe) *.ts ! | 日本語";
       const row = s.promptRow();
       s.sendLine(line);
+      await expect.poll(calls, { timeout: 8000 }).toHaveLength(1);
       await s.waitForPrompt({ afterRow: row });
       expect(calls()).toHaveLength(1);
       expect(calls()[0]?.at(-1)).toBe(line);
@@ -140,6 +141,7 @@ for (const shell of TEST_SHELLS)
       );
       const next = s.promptRow();
       s.sendLine(": next");
+      await expect.poll(calls, { timeout: 8000 }).toHaveLength(2);
       await s.waitForPrompt({ afterRow: next });
       expect(calls()[1]).toContain("c_01ARZ3NDEKTSV4RRFFQ69G5FAV");
       expect(calls()[1]?.[calls()[1]!.indexOf("--shell-id") + 1]).toBe(
@@ -152,6 +154,7 @@ for (const shell of TEST_SHELLS)
       const row = s.promptRow();
       s.paste(line);
       s.press("enter");
+      await expect.poll(calls, { timeout: 8000 }).toHaveLength(1);
       await s.waitForPrompt({ afterRow: row });
       expect(calls()[0]?.at(-1)).toBe(line);
     });
@@ -210,9 +213,10 @@ for (const shell of TEST_SHELLS)
       },
     );
     it("ignores stale directives and leaves a usable prompt", async () => {
-      const { s } = await session(shell);
+      const { s, calls } = await session(shell);
       const row = s.promptRow();
       s.sendLine(": stale restore");
+      await expect.poll(calls, { timeout: 8000 }).toHaveLength(1);
       await s.waitForPrompt({ afterRow: row });
       expect(await s.readVariable("PREFAIX_CONVERSATION_ID")).toBe("");
       expect(await s.run("echo recovered")).toBe("recovered");
@@ -224,6 +228,7 @@ for (const shell of TEST_SHELLS)
       await s.waitForPrompt({ afterRow: row });
       row = s.promptRow();
       s.sendLine(": context please");
+      await expect.poll(calls, { timeout: 8000 }).toHaveLength(1);
       await s.waitForPrompt({ afterRow: row });
       expect(calls()[0]).toContain("1:false");
       const id = await s.readVariable("PREFAIX_SHELL_ID");
@@ -304,12 +309,14 @@ for (const shell of TEST_SHELLS)
       );
       const row = s.promptRow();
       s.sendLine(": hello vi");
+      await expect.poll(calls, { timeout: 8000 }).toHaveLength(1);
       await s.waitForPrompt({ afterRow: row });
       expect(calls()).toHaveLength(1);
       const commandRow = s.promptRow();
       s.send(": command mode\x1b");
       await new Promise((resolve) => setTimeout(resolve, 100));
       s.press("enter");
+      await expect.poll(calls, { timeout: 8000 }).toHaveLength(2);
       await s.waitForPrompt({ afterRow: commandRow });
       expect(calls()).toHaveLength(2);
     });
@@ -373,17 +380,18 @@ for (const shell of TEST_SHELLS)
       const line = ":; touch " + join(home, "must-not-run");
       s.sendLine(line);
       await s.waitFor("not a valid");
-      // Diagnostics can arrive before the classifier exits. Wait for the
-      // restored editor before Ctrl+C, which would otherwise hit that child.
+      // Diagnostics can arrive before the classifier exits. First wait for
+      // the restored display, then verify that the editor handles input.
+      const escapedLine = line.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
       await s.waitFor(
-        new RegExp(
-          "not a valid[\\s\\S]*\\n__pfx " +
-            line.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&") +
-            "$",
-          "u",
-        ),
+        new RegExp("not a valid[\\s\\S]*\\n__pfx " + escapedLine + "$", "u"),
       );
       expect(existsSync(join(home, "must-not-run"))).toBe(false);
+      // A repaint alone does not prove input readiness. Bracketed paste
+      // must reach the editor before Ctrl+C can cancel its buffer.
+      s.paste("x");
+      await s.waitFor(new RegExp("\\n__pfx " + escapedLine + "x$", "u"));
+      expect(existsSync(join(home, "must-not-runx"))).toBe(false);
       s.press("ctrl-c");
       expect(await s.run("echo recovered")).toBe("recovered");
     });

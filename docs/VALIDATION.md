@@ -122,7 +122,7 @@ extensions, and no model prompt. CI offers it as the optional `pi_smoke` job.
 ## Restart and worker cleanup (2026-09-30)
 
 Beads `prefaix-mbd.14` through `.16` are implemented and closed locally. The
-changes remain uncommitted. The validated artifact digest is
+M3 implementation is committed locally as `a281c7d`. The validated artifact digest is
 `4a9434ed1e487887744f59cea64205b920b5e85f3b0f1aec3e44022ad205a96f`.
 
 The regressions cover concurrent record writes and failure recovery, early native
@@ -147,7 +147,7 @@ inside the write, preserving the existing runtime policy.
 | Clean package install | Private 0.0.0 tarball version, all three init outputs, and a fake turn pass |
 | Installed pi 0.99.1 | No-model RPC smoke passes |
 | Docs and privacy | Generated config reference, privacy guard, and whitespace checks pass |
-| Stability | The earlier 50-repeat sweeps below belong to the older artifact; refresh them for this lifecycle artifact before release |
+| Stability | Pending: a fresh sweep failed fish recovery; follow-up exposed early fixture assertions and a fish PTY startup failure. Failed and superseded inputs remain separate |
 
 `daemon stop` acknowledges a shutdown request. The isolated package check waits
 for the daemon lock to disappear before removing its temporary HOME. The daemon
@@ -182,6 +182,29 @@ policy tests verify the Node 26 exception, strict original limits for other
 majors, and rejection of invalid RSS. The Node 26 exception test failed before
 the policy change and passed afterward. Reports are
 `build/m3-validation/allowlist-performance-node{24,26}.json`.
+
+The first fresh lifecycle stability attempt completed 50 repeats on each native
+matrix. The older matrix passed 50/50; the newer one passed 49/50, failing its
+<1% gate at 2%. Newer run 19 timed out after Ctrl+C in fish's invalid-config
+recovery test. Its screen match did not reliably establish editor input
+readiness. The test now waits for a bracketed paste to be handled by the editor
+before cancelling the restored buffer, and checks that neither buffer executes.
+No delay or retry replaces that input acknowledgment. The focused case passes
+on all three shells in both native matrices; full check passes 1,672 tests.
+The failed attempt is retained in `build/flake-lifecycle-{low,high}` and does
+not count toward final stability. A subsequent attempt in
+`build/flake-ready-{low,high}` exposed zsh fixture assertions running before
+the client call log existed (older runs 1 and 4). Positive invocation assertions
+now wait for the recorded call count, then check the prompt and exact arguments.
+This waits for observable work without repeating the command or retrying tests.
+Transient fixture stdout is unsuitable because shell repaint can remove it.
+
+Older run 6 separately failed during fish 3.6.4 startup with
+`No TTY for interactive shell (tcgetpgrp failed)` and `setpgid: Inappropriate`.
+Its cause remains unproven and is tracked in Beads `prefaix-mbd.10.4`; the
+readiness corrections are `.10.2` and `.10.3`. The follow-up sweeps detected the
+test-input edits and invalidated themselves, retaining all logs. Neither counts
+toward final stability. The final input still needs a complete passing sweep.
 
 Real pi child-tree RSS and laptop energy consumption remain unmeasured. These
 fixes bound worker ownership and replay count; they do not establish a battery
