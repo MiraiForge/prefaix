@@ -184,6 +184,49 @@ export const BUFFER: Scenario = [
   { type: "settled", stopReason: "stop" },
 ];
 
+// Every markdown shape the styler claims to handle, in one turn. This exists
+// for a person looking at a terminal: the unit tests assert the bytes, and only
+// an eye says whether they land as bold, fenced, and indented on a real screen.
+export const MARKDOWN: Scenario = [
+  { type: "turn_start" },
+  { type: "text_delta", block: 0, text: "# Heading one\n\n" },
+  { type: "text_delta", block: 0, text: "## Heading two\n\n" },
+  {
+    type: "text_delta",
+    block: 0,
+    text: "Body text with **bold**, *italic*, `inline code`, and a ",
+  },
+  // The marker is split across two deltas, so the hold-back window has to
+  // rejoin it rather than styling half a word.
+  {
+    type: "text_delta",
+    block: 0,
+    text: "[a link](https://example.com) inside a sentence.\n\n",
+  },
+  {
+    type: "text_delta",
+    block: 0,
+    text: "- first item\n- second item\n  - nested item\n- third item\n\n",
+  },
+  { type: "text_delta", block: 0, text: "1. one\n2. two\n3. three\n\n" },
+  { type: "text_delta", block: 0, text: "> a quote\n> over two lines\n\n" },
+  {
+    type: "text_delta",
+    block: 0,
+    text: "```ts\nconst answer: number = 42;\n```\n\n",
+  },
+  { type: "text_delta", block: 0, text: "A table:\n\n" },
+  {
+    type: "text_delta",
+    block: 0,
+    text: "| option | what it does |\n| --- | --- |\n| `:new` | start a conversation |\n| `:info` | show this one |\n\n",
+  },
+  { type: "text_delta", block: 0, text: "---\n\nThat is every shape.\n" },
+  { type: "text_end", block: 0 },
+  { type: "usage", input: 900, output: 240, costUsd: 0 },
+  { type: "settled", stopReason: "stop" },
+];
+
 export const SCENARIOS = {
   hello: HELLO,
   tools: TOOLS,
@@ -192,6 +235,7 @@ export const SCENARIOS = {
   error: ERROR,
   retry: RETRY,
   buffer: BUFFER,
+  markdown: MARKDOWN,
 } as const;
 
 export type ScenarioName = keyof typeof SCENARIOS;

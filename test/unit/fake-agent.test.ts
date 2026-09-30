@@ -189,12 +189,15 @@ describe("fake backend selection", () => {
   });
 
   it("names every scenario it ships", () => {
+    // The list is a guard on the table, not a convenience: a scenario someone
+    // added and cannot name is a scenario nobody will ever run.
     expect(SCENARIO_NAMES).toEqual([
       "buffer",
       "dialog",
       "error",
       "hello",
       "long",
+      "markdown",
       "retry",
       "tools",
     ]);
@@ -213,7 +216,7 @@ describe("fake backend selection", () => {
       installed: true,
       usable: false,
       problem: 'unknown fake scenario "nope"',
-      hint: "Set PREFAIX_FAKE_SCENARIO to one of: buffer, dialog, error, hello, long, retry, tools",
+      hint: "Set PREFAIX_FAKE_SCENARIO to one of: buffer, dialog, error, hello, long, markdown, retry, tools",
     });
   });
 
