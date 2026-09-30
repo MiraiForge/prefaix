@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:contract": "vitest run test/contract",
     "test:e2e": "bun run build && vitest run --config vitest.e2e.config.ts",
+    "test:iterm": "PREFAIX_ITERM=1 vitest run --config vitest.e2e.config.ts test/e2e/iterm.spec.ts",
     "test:unit": "vitest run test/unit",
     "typecheck": "tsc --noEmit"
   },
