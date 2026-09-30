@@ -333,6 +333,7 @@ gates("iTerm2 as a rendering target", () => {
         "| option | what it does |",
         "That is every shape.",
       ]),
+      body,
     ).toEqual([]);
     // A row printed twice is the failure mode a terminal swap causes and a
     // text comparison is the only thing that can see it.

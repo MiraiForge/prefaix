@@ -73,6 +73,15 @@ export class MarkdownStream {
     return this.#state.fence !== undefined;
   }
 
+  /**
+   * Whether the cursor is at the start of a row. False means the last thing
+   * written left the cursor part-way along a line, which is the renderer's cue
+   * that the current row belongs to streamed text and must not be erased.
+   */
+  get atLineStart(): boolean {
+    return this.#atLineStart;
+  }
+
   /** How much is still being held back, which is at most the hold-back window. */
   get pending(): number {
     return this.#buffer.length;

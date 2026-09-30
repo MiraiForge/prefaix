@@ -177,6 +177,12 @@ export interface SpinnerOptions {
   readonly now?: () => number;
   readonly write: (text: string) => void;
   readonly erase: () => void;
+  /**
+   * Whether the current row is the spinner's to draw on. It is not, while a
+   * streamed answer has the cursor part-way along a line: erasing a row that
+   * holds answer text erases the answer.
+   */
+  readonly canPaint?: () => boolean;
 }
 
 /**
@@ -190,6 +196,7 @@ export class Spinner {
   readonly #now: () => number;
   readonly #write: (text: string) => void;
   readonly #erase: () => void;
+  readonly #canPaint: () => boolean;
   #timer: ReturnType<typeof setInterval> | undefined;
   #frame = 0;
   #label = "";
@@ -202,6 +209,7 @@ export class Spinner {
     this.#now = options.now ?? Date.now;
     this.#write = options.write;
     this.#erase = options.erase;
+    this.#canPaint = options.canPaint ?? ((): boolean => true);
   }
 
   get active(): boolean {
@@ -223,6 +231,13 @@ export class Spinner {
   }
 
   #draw(): void {
+    if (!this.#canPaint()) {
+      // The row is not ours, so neither the erase nor the frame happens. The
+      // frame count still moves on, so the spinner resumes where it left off.
+      this.#frame += 1;
+      this.#drawn = false;
+      return;
+    }
     const frame = SPINNER_FRAMES[this.#frame % SPINNER_FRAMES.length] ?? "";
     this.#frame += 1;
     const elapsed = ((this.#now() - this.#startedAt) / 1000).toFixed(1);

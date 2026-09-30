@@ -191,18 +191,18 @@ export const MARKDOWN: Scenario = [
   { type: "turn_start" },
   { type: "text_delta", block: 0, text: "# Heading one\n\n" },
   { type: "text_delta", block: 0, text: "## Heading two\n\n" },
+  // The emphasis marker is split across two deltas, so the hold-back window
+  // has to rejoin it rather than styling half a word. This is the case a real
+  // stream produces constantly and a hand-written fixture never does.
+  { type: "text_delta", block: 0, text: "Body text with **bo" },
   {
     type: "text_delta",
     block: 0,
-    text: "Body text with **bold**, *italic*, `inline code`, and a ",
+    text: "ld**, *italic*, `inline code`, and a [a link](https://example.com) ",
   },
-  // The marker is split across two deltas, so the hold-back window has to
-  // rejoin it rather than styling half a word.
-  {
-    type: "text_delta",
-    block: 0,
-    text: "[a link](https://example.com) inside a sentence.\n\n",
-  },
+  // The line also ends part-way, which leaves the cursor mid-row: the status
+  // line has to wait rather than erase the half of the sentence on screen.
+  { type: "text_delta", block: 0, text: "inside a sentence.\n\n" },
   {
     type: "text_delta",
     block: 0,

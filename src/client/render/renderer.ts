@@ -62,6 +62,13 @@ export class Renderer {
   #openBlock: number | undefined;
   /** True while a tool line owns the last row, which blocks in-place rewrites. */
   #rowBusy = false;
+  /**
+   * True while streamed answer text has the cursor part-way along a line. The
+   * spinner clears its row with a carriage return and an erase-line, so drawing
+   * it here would wipe out the half-arrived line and leave the turn showing only
+   * its tail.
+   */
+  #midLine = false;
   #status = new Map<string, string>();
   #buffer = "";
   #finished = false;
@@ -78,6 +85,7 @@ export class Renderer {
       now: this.#now,
       write: (text) => this.#err(`${text}\n`),
       erase: () => this.#eraseRow(),
+      canPaint: () => !this.#midLine,
     });
     this.#answer = options.answer;
     this.#dialogs = options.dialogs;
@@ -120,10 +128,17 @@ export class Renderer {
       case "turn_start":
         return;
       case "text_delta": {
-        this.#closeOpenBlock();
+        // Closing only on a change of block is what lets the styler's hold-back
+        // span deltas. Closing every time would release a marker whose partner
+        // is in the next delta as plain text, so `*em` + `phasis*` would print
+        // unstyled where one delta would print it in italics.
+        if (this.#openBlock !== event.block) {
+          this.#closeOpenBlock();
+        }
         const stream = this.#streamFor(event.block);
         this.#out(stream.push(event.text));
         this.#openBlock = event.block;
+        this.#midLine = !stream.atLineStart;
         this.#lastText += event.text;
         return;
       }
@@ -209,11 +224,13 @@ export class Renderer {
     if (this.#openBlock === undefined) {
       return;
     }
-    const rest = this.#streams.get(this.#openBlock)?.flush() ?? "";
+    const stream = this.#streams.get(this.#openBlock);
+    const rest = stream?.flush() ?? "";
     if (rest !== "") {
       this.#out(rest);
     }
     this.#openBlock = undefined;
+    this.#midLine = stream?.atLineStart ?? false;
   }
 
   /** Erases the spinner row, which every other write has to do first. */
@@ -224,7 +241,7 @@ export class Renderer {
   }
 
   #eraseRow(): void {
-    if (!this.#caps.inPlace) {
+    if (!this.#caps.inPlace || this.#midLine) {
       return;
     }
     this.#err(IN_PLACE);
