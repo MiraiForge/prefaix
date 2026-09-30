@@ -79,20 +79,25 @@ Each spike produces `docs/spikes/Sn-<slug>.md` covering the question, method, ra
 
 **M2 exit:** in a raw pty (no shell plugin), `prefaix run --shell zsh … -- ': explain this repo'` streams from real pi with an allowed model. A second invocation continues the conversation. Esc aborts. The tty is always restored. The fake-backend suite is green in CI.
 
-**M2 state (2026-09-29):** everything in the table above is implemented, and the
-exit criterion is met against the fake backend in `test/e2e/run.spec.ts` — a
-real zsh in a real pty, the answer on screen, the conversation id in the
-directives file, a second `:` continuing it, and Esc handing the terminal back.
-That gate earned its keep on the first run: the client finished its turn and
-then hung, because a `process.stdin` it had read from still held the event loop
-open. `TtyController.restore` now pauses the stream.
+**M2 state (2026-09-29):** everything in the table above is implemented, and
+**the exit criterion is met on both halves.**
 
-Two things are still open, and neither is code:
+The fake-backend half is `test/e2e/run.spec.ts`: a real zsh in a real pty, the
+answer on screen, the conversation id in the directives file, a second `:`
+continuing it, and Esc handing the terminal back. That gate earned its keep on
+the first run — the client finished its turn and then hung, because a
+`process.stdin` it had read from still held the event loop open.
+`TtyController.restore` now pauses the stream.
 
-- The exit criterion's "streams from real pi with an allowed model" half. The
-  guarded gate exists (`test/contract/live.test.ts`, skipped unless
-  `PREFAIX_LIVE_PROVIDER` and `PREFAIX_LIVE_MODEL` name an allowed pair) and has
-  never been run. bd: `prefaix-0e6`.
+The real-pi half is `test/contract/live.test.ts`, run against
+`kimi-coding/kimi-for-coding`: the only pair authenticated in pi that the live
+guard does not refuse, since pi's own default is `openai-codex/gpt-6-sol`. A
+real model streamed thinking and text, settled with `stop`, the bridge was live,
+and reading pi's own session file confirms the `prefaix` section landed beside
+pi's own rather than replacing it, and that the user message was untouched.
+
+One thing is still open, and it is not code:
+
 - M2-10's "visual check in Ghostty and iTerm2", which is a person's job. bd:
   `prefaix-hzf`.
 

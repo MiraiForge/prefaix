@@ -59,35 +59,39 @@ extensions before it answers its first command, so by the time
 No polling window is needed, and a spawn whose bridge failed to load falls
 straight through to the prepend fallback.
 
-## Not verified, and why
+## Verified live, and verified not
 
-`before_agent_start` fires at the start of the agent loop, so both remaining
-assertions need a model request. `PREFAIX_LIVE_PROVIDER` and
-`PREFAIX_LIVE_MODEL` are not set, and DESIGN §12.4 plus `AGENTS.md` forbid
-sending anything without them.
+Run 2026-09-29 against `kimi-coding/kimi-for-coding` — the only pair
+authenticated in pi that `scripts/live-guard.ts` does not refuse. pi's own
+configured default is `openai-codex/gpt-6-sol`, which the guard refuses on
+purpose.
 
-- The `prefaix` section appears in the transcript's system message, as a
-  **delta** rather than a replacement.
-- `pi.setActiveTools()` from inside the handler actually changes the tool set
-  the model is offered, and `getActiveTools()` returns it afterwards.
-- The visible user message is unchanged in the session JSONL.
+Two of the three remaining assertions are now settled, against pi's own session
+file rather than the extension's account of itself:
 
-To finish:
+- **The `prefaix` section is a delta, not a replacement.** The system message's
+  `content` is the empty string and the context lives in `sections`, which has
+  `prefaix` alongside pi's own `preamble`, `tools`, `project_context`, `rules`,
+  `skills`, and `cwd`. Nothing of pi's was displaced; the `<prefaix>` block sits
+  next to it.
+- **The user message is untouched.** The single user record in the session JSONL
+  is byte for byte what the client sent, with no context block in front of it.
+  That is the entire reason the section path exists: under the prepend fallback
+  the model would read prefaix's context as though the user had typed it.
 
-```sh
-export PREFAIX_LIVE_PROVIDER=google
-export PREFAIX_LIVE_MODEL=google/<an-allowed-model>
-bun run test:contract -- pi-live
-```
+The third is still unverified, and the reason is narrower than "no provider was
+available":
 
-`test/contract/live.test.ts` is the opt-in gate, and it now exists. It spawns a
-real pi through `PiAdapter` with the bridge configured, prompts once, and
-asserts on `<turns>/<pid>.applied.log`, which records the `prompt` pi saw
-alongside whether a section was patched. The log is the artifact the acceptance
-criterion ("the section appears in the transcript and the user message is
-untouched") actually needs, and it is written by the extension itself rather
-than inferred. It skips unless both variables name an allowed pair, and it has
-not been run: tracked as `prefaix-0e6`.
+- **`setActiveTools()` from inside the handler changes the tool set the model is
+  offered.** The live turn ran with no persona, so no tool switch happened and
+  there is nothing to observe. The handler's logic is unit-tested against a fake
+  pi, which proves the call is made in the right order but not that a real pi
+  honours it. Needs a live turn with a persona configured.
+
+`test/contract/live.test.ts` is the opt-in gate and it now asserts all of the
+above. It skips unless `PREFAIX_LIVE_PROVIDER` and `PREFAIX_LIVE_MODEL` name an
+allowed pair, and it finds the session file by the session id the adapter chose,
+so the assertions read the transcript the model actually saw.
 
 ## Decision
 

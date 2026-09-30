@@ -13,7 +13,14 @@
 // `<turns>/<pid>.applied.log`, and that log is the artifact asserted on, rather
 // than anything inferred from stdout.
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
+import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -140,6 +147,40 @@ describe.skipIf(live === undefined)("a real pi with the bridge loaded", () => {
     expect(() => readFileSync(turnContextFile(dir, pid))).toThrow();
   });
 
+  it("adds the prefaix section beside pi's own, not in place of it", () => {
+    const system = systemMessage();
+    // The system message's whole-content field stays empty and the context
+    // lives in `sections`, which is what makes this a delta. A replacement
+    // would have put prefaix's text in `content` and dropped pi's own.
+    expect(system["content"]).toBe("");
+    const sections = system["sections"] as Record<string, string>;
+    expect(Object.keys(sections)).toContain("prefaix");
+    // pi's own sections are still there, which is the other half of "delta".
+    expect(Object.keys(sections)).toContain("preamble");
+    expect(Object.keys(sections)).toContain("tools");
+    const prefaixSection = sections["prefaix"] ?? "";
+    expect(prefaixSection).toContain("<prefaix>");
+    expect(prefaixSection).toContain(process.cwd());
+    expect(prefaixSection).toContain("git status");
+    expect(prefaixSection).toContain("</prefaix>");
+  });
+
+  it("leaves the user's own message exactly as it was sent", () => {
+    const users = records().filter(
+      (record) =>
+        record["type"] === "message" &&
+        (record["message"] as { role?: string }).role === "user",
+    );
+    expect(users).toHaveLength(1);
+    // Byte for byte what the client sent, with no context block in front of it.
+    // This is the whole reason the section path exists: with the prepend
+    // fallback the model would be reading prefaix's context as if the user had
+    // typed it.
+    expect((users[0]?.["message"] as { content: unknown }).content).toEqual([
+      { type: "text", text: ": say hello" },
+    ]);
+  });
+
   it("settles with a real answer", () => {
     const settled = events.find((event) => event.type === "settled");
     expect(settled).toBeDefined();
@@ -153,6 +194,57 @@ describe.skipIf(live === undefined)("a real pi with the bridge loaded", () => {
     ).toBe(true);
   });
 });
+
+/**
+ * pi's own session file for this turn. The adapter named the session, and pi
+ * writes the file as `<timestamp>_<session id>.jsonl`, so the id is the handle.
+ * Reading it is the point: the applied log is the extension's own account of
+ * what it did, and this is the transcript that a model actually saw.
+ */
+function sessionFile(): string {
+  const id = session?.native.sessionId ?? "";
+  // pi puts each session in a directory named after the project directory, and
+  // that naming is its own convention. Searching for the file by the session
+  // id is what does not depend on it: the id is the adapter's, and the id is
+  // the last component of the filename.
+  const root = join(homedir(), ".pi/agent/sessions");
+  if (!existsSync(root)) {
+    throw new Error(`no pi session directory at ${root}`);
+  }
+  for (const project of readdirSync(root, { withFileTypes: true })) {
+    if (!project.isDirectory()) {
+      continue;
+    }
+    const dir = join(root, project.name);
+    const file = readdirSync(dir).find((name) => name.endsWith(`_${id}.jsonl`));
+    if (file !== undefined) {
+      return join(dir, file);
+    }
+  }
+  throw new Error(
+    `no session file for ${id} under ${root}; the adapter asked pi for a ` +
+      "session id that pi did not write a file for",
+  );
+}
+
+function records(): Record<string, unknown>[] {
+  return readFileSync(sessionFile(), "utf8")
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function systemMessage(): Record<string, unknown> {
+  const system = records().find(
+    (record) =>
+      record["type"] === "message" &&
+      (record["message"] as { role?: string }).role === "system",
+  );
+  if (system === undefined) {
+    throw new Error("pi wrote no system message for this turn");
+  }
+  return system["message"] as Record<string, unknown>;
+}
 
 function appliedRecords(): AppliedRecord[] {
   const pid = session?.pid ?? 0;
