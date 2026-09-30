@@ -580,12 +580,26 @@ describe("pi transport framing details", () => {
     const logs: string[] = [];
     const rpc = new PiRpc({
       bin: process.execPath,
+      // The child answers one request with a reply that has no id, and only
+      // then the reply that does. A reader that tripped over the first would
+      // never match the second, so the request answering at all is the
+      // assertion: "nothing was logged" is only worth saying once the second
+      // line has been read and discarded.
       args: [
         "-e",
         [
-          'process.stdout.write(JSON.stringify({type:"response",command:"get_state",success:true,data:{}}) + "\\n");',
-          'process.stdout.write(JSON.stringify({id:"r1",type:"response",command:"get_state",success:true,data:{sessionId:"s"}}) + "\\n");',
-          "setTimeout(() => process.exit(0), 300);",
+          'process.stdin.setEncoding("utf8");',
+          "let asked = 0;",
+          'process.stdin.on("data", (chunk) => {',
+          "  for (const line of chunk.split('\\n').filter(Boolean)) {",
+          "    const request = JSON.parse(line);",
+          "    asked += 1;",
+          "    if (asked === 1) {",
+          '      process.stdout.write(JSON.stringify({type:"response",command:request.command,success:true,data:{}}) + "\\n");',
+          "    }",
+          '    process.stdout.write(JSON.stringify({id:request.id,type:"response",command:request.command,success:true,data:{sessionId:"s"}}) + "\\n");',
+          "  }",
+          "});",
         ].join(""),
       ],
       cwd: ROOT,
@@ -594,13 +608,7 @@ describe("pi transport framing details", () => {
       log: (message) => logs.push(message),
     });
     await rpc.waitReady();
-    // The uncorrelated reply has to have arrived before "nothing was logged"
-    // means anything, so the round trip is waited for rather than guessed at.
-    await collect(rpc, 0).catch(() => undefined);
-    await waitUntil(
-      () => rpc.exited || logs.length > 0,
-      "the child to react to the uncorrelated reply",
-    ).catch(() => undefined);
+    expect(await rpc.request("get_state")).toMatchObject({ sessionId: "s" });
     expect(logs).toEqual([]);
     await rpc.close();
   });
@@ -634,6 +642,9 @@ describe("pi transport framing details", () => {
       killGraceMs: 100,
     });
     rpc.spawn();
+    // The child has to be gone before close, or close is doing a real job: the
+    // wait is for the exit, not for a duration.
+    await waitForExit(rpc);
     await expect(rpc.close()).resolves.toMatchObject({ escalatedTo: "stdin" });
   });
 });
