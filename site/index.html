@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111510" />
+    <meta
+      name="description"
+      content="Prefaix brings a pi coding-agent conversation to zsh, fish, and bash. Prefix a prompt with a colon and keep working in your shell."
+    />
+    <title>Prefaix — A coding agent in your shell</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        color: #edf0e8;
+        background: #111510;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        max-width: 1000px;
+        min-height: 100svh;
+        margin: auto;
+        padding: 48px 40px 32px;
+        display: flex;
+        flex-direction: column;
+      }
+      header,
+      footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+      }
+      .wordmark {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -1px;
+      }
+      .colon {
+        color: #c8ee9e;
+      }
+      .stage {
+        color: #a3ac9b;
+        font-size: 12px;
+      }
+      section {
+        padding: 84px 0 72px;
+      }
+      .eyebrow {
+        color: #c8ee9e;
+        font-size: 12px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+      h1 {
+        margin: 24px 0;
+        max-width: 800px;
+        font-size: clamp(38px, 6vw, 70px);
+        line-height: 1.13;
+        letter-spacing: -3px;
+        font-weight: 500;
+      }
+      .intro {
+        max-width: 630px;
+        margin: 0;
+        color: #b2bbab;
+        font-size: 16px;
+        line-height: 1.8;
+      }
+      code {
+        color: #edf0e8;
+        font-family: inherit;
+      }
+      .terminal {
+        margin: 40px 0 32px;
+        padding: 26px;
+        border: 1px solid #35402d;
+        border-radius: 8px;
+        background: #182015;
+      }
+      .terminal p {
+        margin: 0;
+        font-size: clamp(12px, 2.5vw, 16px);
+        line-height: 1.7;
+        overflow-wrap: anywhere;
+      }
+      .prompt {
+        color: #c8ee9e;
+      }
+      .terminal .hint {
+        margin-top: 14px;
+        color: #a3ac9b;
+        font-size: 12px;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 16px 28px;
+      }
+      a {
+        color: #c8ee9e;
+        text-underline-offset: 4px;
+      }
+      a:hover {
+        color: #edf0e8;
+      }
+      a:focus-visible {
+        outline: 2px solid #c8ee9e;
+        outline-offset: 6px;
+      }
+      .primary {
+        display: inline-block;
+        padding: 15px 20px;
+        background: #c8ee9e;
+        color: #111510;
+        border-radius: 4px;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 700;
+      }
+      .primary:hover {
+        background: #def9c0;
+        color: #111510;
+      }
+      .secondary {
+        font-size: 13px;
+      }
+      footer {
+        margin-top: auto;
+        padding-top: 24px;
+        border-top: 1px solid #30392a;
+        color: #a3ac9b;
+        font-size: 11px;
+      }
+      @media (max-width: 600px) {
+        main {
+          padding: 28px 24px;
+        }
+        header {
+          gap: 16px;
+        }
+        section {
+          padding: 60px 0;
+        }
+        h1 {
+          letter-spacing: -2px;
+        }
+        .intro {
+          font-size: 14px;
+        }
+        .terminal {
+          padding: 20px 16px;
+        }
+        footer {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="wordmark"><span class="colon">:</span> prefaix</span>
+        <span class="stage">Under development</span>
+      </header>
+      <section aria-labelledby="title">
+        <p class="eyebrow">zsh / fish / bash</p>
+        <h1 id="title">A coding agent.<br />In your shell.</h1>
+        <p class="intro">
+          Prefix a prompt with <code>:</code> to talk to pi. Read its answer
+          below your prompt, then keep working where you already are.
+        </p>
+        <div class="terminal" aria-label="Example Prefaix prompt">
+          <p>
+            <span class="prompt">❯ : </span>explain how this repository starts
+          </p>
+          <p class="hint">One colon starts the conversation.</p>
+        </div>
+        <nav class="links" aria-label="Project resources">
+          <a class="primary" href="https://github.com/MiraiForge/prefaix#readme"
+            >Read the README ↗</a
+          >
+          <a class="secondary" href="https://github.com/MiraiForge/prefaix"
+            >View the source</a
+          >
+        </nav>
+      </section>
+      <footer>
+        <span>Built for your terminal.</span>
+        <span>Prefaix · MiraiForge</span>
+      </footer>
+    </main>
+  </body>
+</html>

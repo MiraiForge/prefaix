@@ -1,6 +1,13 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cliVersion, isEntry, runCli } from "../../src/cli/bin.js";
 import { main } from "../../src/cli/index.js";
@@ -117,8 +124,15 @@ describe("the bin", () => {
   });
 
   it("knows when it is the entry and when it was imported", () => {
-    expect(isEntry("file:///a/b.js", "/a/b.js")).toBe(true);
-    expect(isEntry("file:///a/b.js", "/a/other.js")).toBe(false);
+    const entry = join(home, "bin.js");
+    const linked = join(home, "prefaix");
+    writeFileSync(entry, "");
+    symlinkSync(entry, linked);
+    const url = pathToFileURL(realpathSync(entry)).href;
+    expect(isEntry(url, entry)).toBe(true);
+    expect(isEntry(url, linked)).toBe(true);
+    expect(isEntry(url, join(home, "missing.js"))).toBe(false);
+    expect(isEntry("file:///a/other.js", entry)).toBe(false);
     expect(isEntry("file:///a/b.js", undefined)).toBe(false);
     // A Windows-style or relative argv[1] must not throw.
     expect(isEntry("file:///a/b.js", "b.js")).toBe(false);

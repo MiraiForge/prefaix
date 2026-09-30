@@ -117,6 +117,8 @@ export interface TurnHandle {
 
 export interface TurnManagerOptions {
   readonly ringBytes?: number;
+  /** Maximum conversations whose completed event rings remain in memory. */
+  readonly retainedTurns?: number;
   readonly now?: () => number;
   readonly onFinish?: (turn: TurnHandle) => void | Promise<void>;
   readonly onBuffer?: (turn: TurnHandle, text: string) => void;
@@ -140,23 +142,25 @@ export class TurnManager {
    */
   readonly #lastByConversation = new Map<string, TurnHandle>();
   readonly #ringBytes: number;
+  readonly #retainedTurns: number;
   readonly #now: () => number;
   readonly #onFinish: ((turn: TurnHandle) => void | Promise<void>) | undefined;
   readonly #onBuffer: ((turn: TurnHandle, text: string) => void) | undefined;
 
   constructor(options: TurnManagerOptions = {}) {
     this.#ringBytes = options.ringBytes ?? DEFAULT_RING_BYTES;
+    this.#retainedTurns = Math.max(0, Math.floor(options.retainedTurns ?? 64));
     this.#now = options.now ?? Date.now;
     this.#onFinish = options.onFinish;
     this.#onBuffer = options.onBuffer;
   }
 
   get active(): readonly TurnHandle[] {
-    return [...this.#turns.values()];
+    return [...this.#byConversation.values()];
   }
 
   get count(): number {
-    return this.#turns.size;
+    return this.#byConversation.size;
   }
 
   runningFor(conversationId: string): TurnHandle | undefined {
@@ -237,6 +241,7 @@ export class TurnManager {
       this.#byConversation.delete(turn.conversationId);
     }
     this.#lastByConversation.set(turn.conversationId, turn);
+    this.gcLast(this.#retainedTurns);
     void this.#onFinish?.(turn);
   }
 

@@ -59,7 +59,10 @@ const CASES: readonly [string, Expect][] = [
 
   // ── a plain prompt ───────────────────────────────────────────────────────
   [": fix the failing test", { kind: "prompt", text: "fix the failing test" }],
-  [":fix the failing test", { kind: "prompt", text: "fix the failing test" }],
+  [
+    ":fix the failing test",
+    { kind: "command", name: "fix", args: "the failing test", known: false },
+  ],
   [":   spaced out", { kind: "prompt", text: "spaced out" }],
   [":  it's fine", { kind: "prompt", text: "it's fine" }],
   [": echo $(pwd) now", { kind: "prompt", text: "echo $(pwd) now" }],
@@ -77,11 +80,17 @@ const CASES: readonly [string, Expect][] = [
   [": 50% off `now`", { kind: "prompt", text: "50% off `now`" }],
 
   // ── multi-line buffers: only the first line decides ─────────────────────
-  [": first line\nsecond line", { kind: "prompt", text: "first line" }],
-  [": info\nthis is still a note", { kind: "command", name: "info", args: "" }],
+  [
+    ": first line\nsecond line",
+    { kind: "prompt", text: "first line\nsecond line" },
+  ],
+  [
+    ": info\nthis is still a note",
+    { kind: "command", name: "info", args: "\nthis is still a note" },
+  ],
   ["normal\n: not reached", { kind: "pass" }],
   [": trailing newline\n", { kind: "prompt", text: "trailing newline" }],
-  [": windows\r\nline two", { kind: "prompt", text: "windows" }],
+  [": windows\r\nline two", { kind: "prompt", text: "windows\r\nline two" }],
 
   // ── MVP commands ─────────────────────────────────────────────────────────
   [": new", { kind: "command", name: "new", args: "" }],
@@ -185,6 +194,18 @@ const CASES: readonly [string, Expect][] = [
   // failing test` looks like. A bare name that is one edit from a real command
   // is an error, because there is no prompt it could have meant.
   [": nope", { kind: "prompt", text: "nope" }],
+  [
+    ":nonesuch with arguments",
+    { kind: "command", name: "nonesuch", args: "with arguments", known: false },
+  ],
+  [
+    ":modle gemini",
+    { kind: "command", name: "modle", args: "gemini", known: false },
+  ],
+  [
+    ":copy unexpected",
+    { kind: "command", name: "copy", args: "unexpected", known: true },
+  ],
   // One edit from `:new`, so the error listing the closest matches is the
   // right answer rather than sending `Nw` to the model as a question.
   [":Nw", { kind: "command", name: "Nw", known: false }],
@@ -317,7 +338,7 @@ describe("configurable behaviour", () => {
     // happens to start with a command's name, and only the first line counts.
     expect(parseLine(": run this\n: and this")).toMatchObject({
       kind: "prompt",
-      text: "run this",
+      text: "run this\n: and this",
     });
     expect(parseLine(": new\n: and this")).toMatchObject({ kind: "command" });
   });

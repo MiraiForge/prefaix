@@ -32,11 +32,16 @@ export interface ConversationRecord {
   model?: { provider: string; id: string };
   thinking?: string;
   persona?: string;
+  lastAssistantText?: string;
+  usage?: { input: number; output: number; costUsd?: number };
   stats: { turns: number; costUsd?: number; lastContextPct?: number };
   createdBy: { shell: ShellKind; host: string };
 }
 
 const TITLE_LIMIT = 60;
+// The daemon is the single writer. Store instances in its process can share
+// an index, so each record's reads and mutations form a queue.
+const recordOperations = new Map<string, Promise<void>>();
 
 export function titleFrom(prompt: string): string {
   // A leading `:` is stripped so the title reads as the question rather than as
@@ -129,24 +134,80 @@ export class ConversationStore {
     await mkdir(this.#paths.conversationsDir, { recursive: true, mode: 0o700 });
   }
 
-  async save(record: ConversationRecord): Promise<ConversationRecord> {
-    await this.#ensureDir();
-    const target = conversationFile(this.#paths, record.id);
-    const temp = `${target}.${String(process.pid)}.tmp`;
-    const handle = await open(temp, "w", 0o600);
+  async #withRecord<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const target = conversationFile(this.#paths, id);
+    const previous = recordOperations.get(target) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    recordOperations.set(target, current);
+    await previous;
     try {
-      await handle.writeFile(`${JSON.stringify(record, null, 2)}\n`, "utf8");
-      // The data has to be on the medium before the rename, or a crash can
-      // leave the name pointing at nothing.
+      return await operation();
+    } finally {
+      // The queue gate always resolves, even when an operation failed.
+      release();
+      if (recordOperations.get(target) === current) {
+        recordOperations.delete(target);
+      }
+    }
+  }
+
+  async #syncDirectory(dir: string): Promise<void> {
+    const handle = await open(dir, "r");
+    try {
       await handle.sync();
     } finally {
       await handle.close();
     }
-    await rename(temp, target);
-    return record;
+  }
+
+  async save(record: ConversationRecord): Promise<ConversationRecord> {
+    return this.#withRecord(record.id, () => this.#save(record));
+  }
+
+  async #save(record: ConversationRecord): Promise<ConversationRecord> {
+    await this.#ensureDir();
+    const target = conversationFile(this.#paths, record.id);
+    const { randomUUID } = process.getBuiltinModule("crypto");
+    const temp = `${target}.${randomUUID()}.tmp`;
+    let ownsTemp = false;
+    try {
+      const handle = await open(temp, "wx", 0o600);
+      ownsTemp = true;
+      try {
+        await handle.writeFile(`${JSON.stringify(record, null, 2)}\n`, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await rename(temp, target);
+      ownsTemp = false;
+      // Syncing the file protects its contents; syncing the directory protects
+      // the renamed entry. A failure after rename still leaves valid JSON.
+      await this.#syncDirectory(this.#paths.conversationsDir);
+      return record;
+    } finally {
+      if (ownsTemp) {
+        try {
+          await unlink(temp);
+          await this.#syncDirectory(this.#paths.conversationsDir);
+        } catch (cause) {
+          this.#log?.("could not clean up a conversation temporary file", {
+            id: record.id,
+            cause: messageOf(cause),
+          });
+        }
+      }
+    }
   }
 
   async get(id: string): Promise<ConversationRecord | undefined> {
+    return this.#withRecord(id, () => this.#get(id));
+  }
+
+  async #get(id: string): Promise<ConversationRecord | undefined> {
     let text: string;
     try {
       text = await readFile(conversationFile(this.#paths, id), "utf8");
@@ -177,6 +238,8 @@ export class ConversationStore {
     try {
       await mkdir(dir, { recursive: true, mode: 0o700 });
       await rename(from, posix.join(dir, `${id}.json`));
+      await this.#syncDirectory(dir);
+      await this.#syncDirectory(this.#paths.conversationsDir);
     } catch (cause) {
       this.#log?.("could not quarantine a corrupt conversation file", {
         id,
@@ -219,6 +282,7 @@ export class ConversationStore {
         ? all
         : all.filter(
             (record) =>
+              record.id.toLowerCase().includes(needle) ||
               record.title.toLowerCase().includes(needle) ||
               record.root.toLowerCase().includes(needle),
           );
@@ -231,35 +295,40 @@ export class ConversationStore {
   }
 
   async remove(id: string): Promise<boolean> {
-    try {
-      await unlink(conversationFile(this.#paths, id));
-      return true;
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
-        return false;
+    return this.#withRecord(id, async () => {
+      try {
+        await unlink(conversationFile(this.#paths, id));
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code === "ENOENT") {
+          return false;
+        }
+        throw cause;
       }
-      throw cause;
-    }
+      await this.#syncDirectory(this.#paths.conversationsDir);
+      return true;
+    });
   }
 
   async update(
     id: string,
     patch: Partial<Omit<ConversationRecord, "id" | "createdAt">>,
   ): Promise<ConversationRecord> {
-    const existing = await this.get(id);
-    if (existing === undefined) {
-      throw new PrefaixError(
-        "CONVERSATION_NOT_FOUND",
-        `no conversation with id ${JSON.stringify(id)}`,
-      );
-    }
-    return this.save({
-      ...existing,
-      ...patch,
-      native: patch.native ?? existing.native,
-      stats: patch.stats ?? existing.stats,
-      createdBy: patch.createdBy ?? existing.createdBy,
-      updatedAt: new Date().toISOString(),
+    return this.#withRecord(id, async () => {
+      const existing = await this.#get(id);
+      if (existing === undefined) {
+        throw new PrefaixError(
+          "CONVERSATION_NOT_FOUND",
+          `no conversation with id ${JSON.stringify(id)}`,
+        );
+      }
+      return this.#save({
+        ...existing,
+        ...patch,
+        native: patch.native ?? existing.native,
+        stats: patch.stats ?? existing.stats,
+        createdBy: patch.createdBy ?? existing.createdBy,
+        updatedAt: new Date().toISOString(),
+      });
     });
   }
 }

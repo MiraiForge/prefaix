@@ -24,6 +24,8 @@ export interface Connection {
   /** The client's pid, filled in by the hello handshake. */
   pid: number;
   send(message: DaemonMessage): void;
+  /** Release on drain, disconnect, or abort; in-memory connections need no wait. */
+  waitWritable?(signal?: AbortSignal): Promise<void> | void;
   close(): void;
   readonly closed: boolean;
 }
@@ -34,6 +36,7 @@ interface MutableConnection {
   pid: number;
   closed: boolean;
   send(message: DaemonMessage): void;
+  waitWritable(signal?: AbortSignal): Promise<void> | void;
   close(): void;
   onMessage(line: string): void;
 }
@@ -176,17 +179,41 @@ export class SocketServer {
   #accept(socket: Socket): void {
     socket.setEncoding("utf8");
     let buffer = "";
+    const blockedWriters = new Set<() => void>();
+    const releaseWriters = (): void => {
+      for (const release of blockedWriters) release();
+    };
     const connection: MutableConnection = {
       id: `c${String(++this.#nextId)}`,
       pid: 0,
       closed: false,
       send: (message) => {
-        if (!socket.writableEnded) {
+        if (!connection.closed && !socket.writableEnded && !socket.destroyed) {
           socket.write(encodeRecord(message));
         }
       },
+      waitWritable: (signal) => {
+        if (connection.closed || !socket.writableNeedDrain || signal?.aborted)
+          return;
+        return new Promise<void>((resolve) => {
+          const done = () => {
+            blockedWriters.delete(done);
+            socket.removeListener("drain", done);
+            socket.removeListener("close", done);
+            socket.removeListener("error", done);
+            signal?.removeEventListener("abort", done);
+            resolve();
+          };
+          blockedWriters.add(done);
+          socket.once("drain", done);
+          socket.once("close", done);
+          socket.once("error", done);
+          signal?.addEventListener("abort", done, { once: true });
+        });
+      },
       close: () => {
         connection.closed = true;
+        releaseWriters();
         socket.end();
       },
       onMessage: (line) => {
@@ -214,6 +241,7 @@ export class SocketServer {
         return;
       }
       connection.closed = true;
+      releaseWriters();
       this.#handlers.onClose(connection);
     };
     socket.on("close", finish);

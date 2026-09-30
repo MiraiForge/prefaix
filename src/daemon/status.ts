@@ -4,10 +4,10 @@
 // plain text written atomically: a shell that reads it while prefaix is
 // rewriting it must see the old file or the new one, never half of either.
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { posix } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 import { shellRuntimeFiles } from "../core/paths.js";
 import type { PrefaixPaths } from "../core/paths.js";
+import { writeShellStatus } from "../core/status-file.js";
 
 /** What the right prompt shows after a turn. */
 export const STATUS_TEXT = {
@@ -37,7 +37,7 @@ export function createStatusFiles(paths: PrefaixPaths): StatusFiles {
   const file = (shellId: string) => shellRuntimeFiles(paths, shellId).status;
   return {
     async writeStatus(shellId, status) {
-      await writeAtomic(file(shellId), `${STATUS_TEXT[status]}\n`);
+      await writeShellStatus(paths, shellId, STATUS_TEXT[status]);
     },
     async readStatus(shellId) {
       try {
@@ -54,11 +54,4 @@ export function createStatusFiles(paths: PrefaixPaths): StatusFiles {
       );
     },
   };
-}
-
-async function writeAtomic(file: string, text: string): Promise<void> {
-  await mkdir(posix.dirname(file), { recursive: true, mode: 0o700 });
-  const temp = `${file}.${String(process.pid)}.tmp`;
-  await writeFile(temp, text, { mode: 0o600 });
-  await rename(temp, file);
 }

@@ -4,7 +4,6 @@
 // makes a turn safe to abandon: after an abort the leftover records are dropped
 // rather than leaking into the next turn's stream.
 
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
@@ -51,26 +50,8 @@ import {
   isAgentStart,
 } from "./types.js";
 
-export const PI_ID = "pi";
-
-const PI_BASE_CAPABILITIES: Capabilities = {
-  steer: true,
-  followUp: true,
-  abort: true,
-  models: true,
-  thinkingLevels: true,
-  compact: true,
-  slashCommands: true,
-  skills: true,
-  uiDialogs: true,
-  handoffTui: true,
-  // Both are only real when the bridge extension is in play: without it the
-  // context block is prepended to the user's message and a persona change
-  // needs a respawn. The bundle is resolved by the composition root, so an
-  // adapter built without one is deliberately the fallback shape.
-  contextSections: false,
-  personasWithoutRespawn: false,
-};
+import { PI_ID, piCapabilities } from "./capabilities.js";
+export { PI_ID, bridgeConfigured } from "./capabilities.js";
 
 export interface PiAdapterOptions {
   readonly bin?: string;
@@ -89,11 +70,6 @@ export interface PiAdapterOptions {
   readonly log?: (message: string, fields?: Record<string, unknown>) => void;
   /** Injectable so a test can decide what the probe sees. */
   readonly bridgeReady?: (file: string) => boolean;
-}
-
-/** Whether a bridge path plus a turns dir is enough to enable the section path. */
-export function bridgeConfigured(options: PiAdapterOptions = {}): boolean {
-  return (options.bridgePath ?? "") !== "" && (options.turnsDir ?? "") !== "";
 }
 
 // pi's native ids must match [A-Za-z0-9._-] and start and end alphanumeric.
@@ -168,6 +144,7 @@ export class PiSession implements AgentSession {
   readonly #rpc: PiRpc;
   readonly #mapperOptions: MapperOptions;
   #busy = false;
+  #closePromise: Promise<void> | undefined;
   #turnAbort: AbortController | undefined;
   #persona: PersonaSpec | undefined;
   // The mapper of the running turn, which knows pi's own id for each dialog.
@@ -210,6 +187,10 @@ export class PiSession implements AgentSession {
   /** The child pid, once it is known; undefined before the child spawns. */
   get pid(): number | undefined {
     return this.#pid;
+  }
+
+  get isAlive(): boolean {
+    return !this.#rpc.exited;
   }
 
   get busy(): boolean {
@@ -510,6 +491,23 @@ export class PiSession implements AgentSession {
     });
   }
 
+  async listThinkingLevels(): Promise<string[]> {
+    const data: unknown = await this.#rpc.request(
+      "get_available_thinking_levels",
+    );
+    if (
+      typeof data !== "object" ||
+      data === null ||
+      !("levels" in data) ||
+      !Array.isArray(data.levels)
+    ) {
+      return [];
+    }
+    return data.levels.filter(
+      (level): level is string => typeof level === "string",
+    );
+  }
+
   async setThinking(level: string): Promise<void> {
     await this.#rpc.request("set_thinking_level", { level });
   }
@@ -550,6 +548,13 @@ export class PiSession implements AgentSession {
   }
 
   async setPersona(persona: PersonaSpec): Promise<void> {
+    if (!this.#bridgeLive) {
+      throw new PrefaixError(
+        "UNSUPPORTED",
+        "this pi child cannot switch personas because the bridge is unavailable",
+        { hint: "Respawn the child with the requested persona." },
+      );
+    }
     // Recorded here and published with the next turn's context file, where the
     // bridge swaps pi's active tools. A persona set outside a turn therefore
     // takes effect on the next `:` rather than immediately, which is the first
@@ -578,10 +583,13 @@ export class PiSession implements AgentSession {
     };
   }
 
-  async close(): Promise<void> {
-    this.#clearReadyFile();
-    this.#clearContextFile();
-    await this.#rpc.close();
+  close(): Promise<void> {
+    this.#closePromise ??= (async () => {
+      this.#clearReadyFile();
+      this.#clearContextFile();
+      await this.#rpc.close();
+    })();
+    return this.#closePromise;
   }
 }
 
@@ -620,10 +628,11 @@ async function resolveOnPath(
   return undefined;
 }
 
-function piVersion(
+async function piVersion(
   bin: string,
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<string | undefined> {
+  const { execFile } = await import("node:child_process");
   return new Promise((resolve) => {
     const child = execFile(
       bin,
@@ -645,12 +654,7 @@ export class PiAdapter implements AgentBackend {
 
   constructor(options: PiAdapterOptions = {}) {
     this.#options = options;
-    this.capabilities = {
-      ...PI_BASE_CAPABILITIES,
-      ...(bridgeConfigured(options)
-        ? { contextSections: true, personasWithoutRespawn: true }
-        : {}),
-    };
+    this.capabilities = piCapabilities(options);
   }
 
   get sessions(): readonly PiSession[] {

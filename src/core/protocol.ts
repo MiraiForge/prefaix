@@ -127,21 +127,26 @@ export interface ConvCompactParams {
 }
 
 export interface ModelListParams {
+  env?: Record<string, string>;
   conversationId?: string;
 }
 
 export interface ModelSetParams {
+  env?: Record<string, string>;
   conversationId?: string;
   ref: { provider: string; id: string };
 }
 
 export interface ThinkingSetParams {
+  env?: Record<string, string>;
   conversationId?: string;
   level: string;
 }
 
 export interface CommandsListParams {
   conversationId?: string;
+  env?: Record<string, string>;
+  cwd?: string;
 }
 
 export interface StatusGetParams {
@@ -179,6 +184,18 @@ export interface Operations {
     result: { turnId: string; fromSeq: number };
   };
   "conv.new": { params: ConvNewParams; result: ConversationSummary };
+  "conv.select": {
+    params: {
+      conversationId: string;
+      shell: ShellVersionInfo;
+      previousConversationId?: string;
+    };
+    result: ConversationSummary;
+  };
+  "conv.previous": {
+    params: { shellId: string; fallback?: string };
+    result: ConversationSummary;
+  };
   "conv.list": {
     params: ConvListParams;
     result: { conversations: ConversationSummary[] };
@@ -199,6 +216,7 @@ export interface Operations {
     params: ModelSetParams;
     result: { model: { provider: string; id: string } };
   };
+  "thinking.list": { params: ModelListParams; result: { levels: string[] } };
   "thinking.set": { params: ThinkingSetParams; result: { level: string } };
   "commands.list": {
     params: CommandsListParams;
@@ -222,6 +240,8 @@ export const OPERATION_NAMES: readonly OperationName[] = [
   "ui.respond",
   "turn.attach",
   "conv.new",
+  "conv.select",
+  "conv.previous",
   "conv.list",
   "conv.get",
   "conv.rename",
@@ -230,6 +250,7 @@ export const OPERATION_NAMES: readonly OperationName[] = [
   "conv.compact",
   "model.list",
   "model.set",
+  "thinking.list",
   "thinking.set",
   "commands.list",
   "status.get",

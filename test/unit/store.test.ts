@@ -1,14 +1,16 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import * as fs from "node:fs/promises";
 import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ConversationStore,
   newRecord,
@@ -17,6 +19,18 @@ import {
 } from "../../src/daemon/store.js";
 import { conversationFile, resolvePaths } from "../../src/core/paths.js";
 import { PrefaixError } from "../../src/core/errors.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof fs>();
+  return {
+    ...actual,
+    mkdir: vi.fn(actual.mkdir),
+    open: vi.fn(actual.open),
+    rename: vi.fn(actual.rename),
+    unlink: vi.fn(actual.unlink),
+  };
+});
+const originalFs = await vi.importActual<typeof fs>("node:fs/promises");
 
 /** A valid conversation id, since the store refuses to put anything else on disk. */
 function cid(n: number): string {
@@ -28,12 +42,17 @@ let paths: ReturnType<typeof resolvePaths>;
 let store: ConversationStore;
 
 beforeEach(() => {
+  vi.mocked(fs.mkdir).mockReset().mockImplementation(originalFs.mkdir);
+  vi.mocked(fs.open).mockReset().mockImplementation(originalFs.open);
+  vi.mocked(fs.rename).mockReset().mockImplementation(originalFs.rename);
+  vi.mocked(fs.unlink).mockReset().mockImplementation(originalFs.unlink);
   home = mkdtempSync(join(tmpdir(), "pfx-store-"));
   paths = resolvePaths({ env: { HOME: home }, home });
   store = new ConversationStore({ paths });
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -84,6 +103,21 @@ describe("a conversation's title", () => {
 });
 
 describe("saving and loading", () => {
+  it("commits concurrent saves without sharing a temporary file", async () => {
+    const original = record();
+    const writes = Array.from({ length: 12 }, (_, index) => ({
+      ...original,
+      title: `${index}: ${"x".repeat(index * 100)}`,
+    }));
+
+    await Promise.all(writes.map((next) => store.save(next)));
+
+    expect(await store.get(original.id)).toEqual(writes.at(-1));
+    expect(readdirSync(paths.conversationsDir)).toEqual([
+      `${original.id}.json`,
+    ]);
+  });
+
   it("writes a record the store can read back unchanged", async () => {
     const original = record();
     await store.save(original);
@@ -99,6 +133,171 @@ describe("saving and loading", () => {
   it("leaves no temp file behind", async () => {
     await store.save(record());
     expect(readdirSync(paths.conversationsDir)).toEqual([`${cid(0)}.json`]);
+  });
+
+  it("syncs the file before rename and the containing directory after it", async () => {
+    const events: string[] = [];
+    const open = originalFs.open;
+    const rename = originalFs.rename;
+    const opening = vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      const sync = handle.sync.bind(handle);
+      vi.spyOn(handle, "sync").mockImplementation(async () => {
+        events.push(args[0] === paths.conversationsDir ? "directory" : "file");
+        await sync();
+      });
+      return handle;
+    });
+    vi.mocked(fs.rename).mockImplementation(async (...args) => {
+      events.push("rename");
+      return rename(...args);
+    });
+
+    await store.save(record());
+    await store.save(record());
+
+    expect(events).toEqual([
+      "file",
+      "rename",
+      "directory",
+      "file",
+      "rename",
+      "directory",
+    ]);
+    const tempOpens = opening.mock.calls.filter(([, flags]) => flags === "wx");
+    expect(tempOpens).toHaveLength(2);
+    expect(tempOpens[0]?.[0]).not.toEqual(tempOpens[1]?.[0]);
+    expect(tempOpens.every(([, , mode]) => mode === 0o600)).toBe(true);
+  });
+
+  it.each(["write", "file sync", "rename"])(
+    "cleans up after a failed %s and unblocks the next queued write",
+    async (stage) => {
+      const original = await store.save(record());
+      const failed = new Error(`failed ${stage}`);
+      if (stage === "rename") {
+        vi.mocked(fs.rename).mockRejectedValueOnce(failed);
+      } else {
+        const open = originalFs.open;
+        vi.mocked(fs.open).mockImplementationOnce(async (...args) => {
+          const handle = await open(...args);
+          if (stage === "write") {
+            vi.spyOn(handle, "writeFile").mockRejectedValueOnce(failed);
+          } else {
+            vi.spyOn(handle, "sync").mockRejectedValueOnce(failed);
+          }
+          return handle;
+        });
+      }
+
+      const writing = store.save({ ...original, title: "failed" });
+      const rejected = expect(writing).rejects.toBe(failed);
+      const reading = store.get(original.id);
+      const next = store.update(original.id, { thinking: "high" });
+      await rejected;
+      expect(await reading).toEqual(original);
+      expect(await next).toMatchObject({
+        title: original.title,
+        thinking: "high",
+      });
+      expect(readdirSync(paths.conversationsDir)).toEqual([
+        `${original.id}.json`,
+      ]);
+    },
+  );
+
+  it("leaves valid JSON and releases the queue if directory sync fails after rename", async () => {
+    const original = await store.save(record());
+    const failed = new Error("failed directory sync");
+    const open = originalFs.open;
+    let injected = false;
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      if (args[0] === paths.conversationsDir && !injected) {
+        injected = true;
+        vi.spyOn(handle, "sync").mockRejectedValueOnce(failed);
+      }
+      return handle;
+    });
+
+    const writing = store.save({ ...original, title: "committed" });
+    const rejected = expect(writing).rejects.toBe(failed);
+    const next = store.update(original.id, { thinking: "high" });
+    await rejected;
+    expect(await next).toMatchObject({ title: "committed", thinking: "high" });
+    expect(readdirSync(paths.conversationsDir)).toEqual([
+      `${original.id}.json`,
+    ]);
+  });
+
+  it("never removes an existing temp file it could not exclusively open", async () => {
+    const original = await store.save(record());
+    let foreignTemp = "";
+    vi.mocked(fs.open).mockImplementationOnce(async (...args) => {
+      foreignTemp = String(args[0]);
+      writeFileSync(foreignTemp, "unrelated writer");
+      return originalFs.open(...args);
+    });
+
+    const writing = store.save({ ...original, title: "failed" });
+    const rejected = expect(writing).rejects.toMatchObject({ code: "EEXIST" });
+    const next = store.update(original.id, { thinking: "high" });
+    await rejected;
+    expect(await next).toMatchObject({
+      title: original.title,
+      thinking: "high",
+    });
+    expect(readFileSync(foreignTemp, "utf8")).toBe("unrelated writer");
+  });
+
+  it("reports failed temp cleanup without masking the write error or blocking recovery", async () => {
+    const problems: Array<{ message: string; fields: unknown }> = [];
+    const noisy = new ConversationStore({
+      paths,
+      log: (message, fields) => problems.push({ message, fields }),
+    });
+    const original = await noisy.save(record());
+    const failed = new Error("failed rename");
+    vi.mocked(fs.rename).mockRejectedValueOnce(failed);
+    vi.mocked(fs.unlink).mockRejectedValueOnce(new Error("failed cleanup"));
+
+    const writing = noisy.save({ ...original, title: "failed" });
+    const rejected = expect(writing).rejects.toBe(failed);
+    const next = noisy.update(original.id, { thinking: "high" });
+    await rejected;
+    expect(await next).toMatchObject({
+      title: original.title,
+      thinking: "high",
+    });
+    expect(problems).toEqual([
+      {
+        message: "could not clean up a conversation temporary file",
+        fields: {
+          id: original.id,
+          cause: "failed cleanup",
+        },
+      },
+    ]);
+    expect(await noisy.list()).toHaveLength(1);
+    expect(
+      readdirSync(paths.conversationsDir).filter((name) =>
+        name.endsWith(".tmp"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("orders reads and removal after a pending save", async () => {
+    const original = await store.save(record());
+    const next = { ...original, title: "committed" };
+
+    const writing = store.save(next);
+    const reading = store.get(original.id);
+    const removing = store.remove(original.id);
+
+    expect(await writing).toEqual(next);
+    expect(await reading).toEqual(next);
+    expect(await removing).toBe(true);
+    expect(await store.get(original.id)).toBeUndefined();
   });
 
   it("reports a conversation that was never saved", async () => {
@@ -192,6 +391,57 @@ describe("listing and searching", () => {
 });
 
 describe("updating", () => {
+  it("preserves independent fields from concurrent updates", async () => {
+    const saved = await store.save(record());
+
+    await Promise.all([
+      store.update(saved.id, { title: "renamed" }),
+      store.update(saved.id, { thinking: "high" }),
+      store.update(saved.id, { persona: "review" }),
+    ]);
+
+    expect(await store.get(saved.id)).toMatchObject({
+      title: "renamed",
+      thinking: "high",
+      persona: "review",
+    });
+    expect(readdirSync(paths.conversationsDir)).toEqual([`${saved.id}.json`]);
+  });
+
+  it("serializes stores sharing the same on-disk record", async () => {
+    const saved = await store.save(record());
+    const second = new ConversationStore({ paths });
+
+    await Promise.all([
+      store.update(saved.id, { title: "renamed" }),
+      second.update(saved.id, { thinking: "high" }),
+    ]);
+
+    expect(await store.get(saved.id)).toMatchObject({
+      title: "renamed",
+      thinking: "high",
+    });
+  });
+
+  it("syncs the directory when removing a record", async () => {
+    const saved = await store.save(record());
+    const open = originalFs.open;
+    const sync = vi.fn();
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      const realSync = handle.sync.bind(handle);
+      vi.spyOn(handle, "sync").mockImplementation(async () => {
+        sync(args[0]);
+        await realSync();
+      });
+      return handle;
+    });
+
+    await store.remove(saved.id);
+
+    expect(sync).toHaveBeenCalledExactlyOnceWith(paths.conversationsDir);
+  });
+
   it("merges a patch and stamps updatedAt", async () => {
     const saved = await store.save(record());
     const updated = await store.update(saved.id, { title: "renamed" });
@@ -229,6 +479,67 @@ describe("updating", () => {
 });
 
 describe("a corrupt record", () => {
+  it("finishes quarantine before a queued save can replace the record", async () => {
+    const saved = await store.save(record());
+    writeFileSync(conversationFile(paths, saved.id), "{ not json");
+    let entered!: () => void;
+    const quarantining = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(fs.rename).mockImplementationOnce(async (...args) => {
+      entered();
+      await paused;
+      await originalFs.rename(...args);
+    });
+
+    const reading = store.get(saved.id);
+    await quarantining;
+    const mkdirs = vi.mocked(fs.mkdir).mock.calls.length;
+    const next = { ...saved, title: "recovered" };
+    const writing = store.save(next);
+    await Promise.resolve();
+    const startedEarly = vi.mocked(fs.mkdir).mock.calls.length > mkdirs;
+    release();
+
+    expect(await reading).toBeUndefined();
+    expect(await writing).toEqual(next);
+    expect(startedEarly).toBe(false);
+    expect(await store.get(saved.id)).toEqual(next);
+    expect(
+      readFileSync(
+        join(paths.conversationsDir, ".corrupt", `${saved.id}.json`),
+        "utf8",
+      ),
+    ).toBe("{ not json");
+  });
+
+  it("syncs both directories after moving a corrupt record", async () => {
+    const saved = await store.save(record());
+    writeFileSync(conversationFile(paths, saved.id), "{ not json");
+    const open = originalFs.open;
+    const sync = vi.fn();
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      const realSync = handle.sync.bind(handle);
+      vi.spyOn(handle, "sync").mockImplementation(async () => {
+        sync(args[0]);
+        await realSync();
+      });
+      return handle;
+    });
+
+    expect(await store.get(saved.id)).toBeUndefined();
+
+    expect(sync.mock.calls).toEqual([
+      [join(paths.conversationsDir, ".corrupt")],
+      [paths.conversationsDir],
+    ]);
+  });
+
   it("is quarantined rather than deleted, and reported as missing", async () => {
     const saved = await store.save(record());
     writeFileSync(conversationFile(paths, saved.id), "{ not json");
@@ -283,6 +594,37 @@ describe("a corrupt record", () => {
     expect(problems.some((line) => line.includes("could not quarantine"))).toBe(
       true,
     );
+  });
+});
+
+describe("filesystem errors", () => {
+  it("reports an unreadable record and permits recovery after the error", async () => {
+    mkdirSync(conversationFile(paths, cid(0)), { recursive: true });
+
+    await expect(store.get(cid(0))).rejects.toThrow();
+
+    rmSync(conversationFile(paths, cid(0)), { recursive: true, force: true });
+    await store.save(record());
+    expect(await store.get(cid(0))).toEqual(
+      expect.objectContaining({ id: cid(0) }),
+    );
+  });
+
+  it("reports an index that cannot be listed instead of treating it as empty", async () => {
+    mkdirSync(paths.stateDir, { recursive: true });
+    writeFileSync(paths.conversationsDir, "not a directory");
+
+    await expect(store.list()).rejects.toThrow();
+  });
+
+  it("reports failed removal and releases the record queue", async () => {
+    mkdirSync(conversationFile(paths, cid(0)), { recursive: true });
+
+    await expect(store.remove(cid(0))).rejects.toThrow();
+
+    rmSync(conversationFile(paths, cid(0)), { recursive: true, force: true });
+    await store.save(record());
+    expect(await store.remove(cid(0))).toBe(true);
   });
 });
 

@@ -13,10 +13,8 @@ import {
 } from "../core/errors.js";
 import { resolvePaths } from "../core/paths.js";
 import type { PrefaixPaths } from "../core/paths.js";
-import { runConfigCheck } from "./config.js";
-import { run } from "../client/run.js";
-import { runDaemon, daemonStatus, stopDaemon } from "./daemon.js";
-import { runConversations, runTap } from "./conversations.js";
+import type { run } from "../client/run.js";
+import type { runDaemon } from "./daemon.js";
 import type { RawModeTarget } from "../client/tty.js";
 
 export const USAGE = `prefaix — a coding agent at your shell prompt
@@ -26,6 +24,10 @@ usage:
   prefaix daemon start|stop|status      manage the long-lived daemon
   prefaix conversations ls|show|rm      list, show, and remove conversations
   prefaix config check                  validate the config file
+  prefaix init zsh|fish|bash             print the shell integration
+  prefaix setup [--shell <name>]        preview and install the rc line
+  prefaix uninstall [--shell <name>]    remove the managed rc line
+  prefaix doctor                        diagnose this installation
   prefaix debug tap <conversation>      print a conversation's raw events
   prefaix --version                     print the version
   prefaix --help                        this text
@@ -75,7 +77,59 @@ export async function main(options: CliOptions): Promise<ExitCode> {
   const paths = options.paths ?? resolvePaths({ env });
   try {
     switch (command) {
-      case "run":
+      case "classify": {
+        if (rest.length !== 2 || rest[0] !== "--") {
+          err("usage: prefaix classify -- '<raw line>'\n");
+          return EXIT.usage;
+        }
+        const { loadConfig } = await import("../core/config/index.js");
+        const { parseLine } = await import("../shells/grammar.js");
+        const config = loadConfig({ env, file: paths.configFile });
+        return parseLine(rest[1]!, {
+          passthrough: config.grammar.passthrough,
+          personas: Object.keys(config.personas),
+        }).kind === "pass"
+          ? EXIT.agentError
+          : EXIT.ok;
+      }
+      case "init": {
+        const shell = rest[0];
+        if (
+          rest.length !== 1 ||
+          (shell !== "zsh" && shell !== "fish" && shell !== "bash")
+        ) {
+          err("usage: prefaix init zsh|fish|bash\n");
+          return EXIT.usage;
+        }
+        const { initShell } = await import("../shells/plugins/index.js");
+        const { loadConfig } = await import("../core/config/index.js");
+        out(
+          initShell(shell, {
+            config: loadConfig({ env, file: paths.configFile }),
+            paths,
+          }),
+        );
+        return EXIT.ok;
+      }
+      case "setup":
+      case "uninstall": {
+        const { runSetup, runUninstall } = await import("./setup.js");
+        return await (command === "setup" ? runSetup : runUninstall)(rest, {
+          env,
+          out,
+          err,
+        });
+      }
+      case "doctor": {
+        const { runDoctor } = await import("./doctor.js");
+        if (rest.length > 0) {
+          err("usage: prefaix doctor\n");
+          return EXIT.usage;
+        }
+        return await runDoctor({ env, paths, out, err });
+      }
+      case "run": {
+        const { run } = await import("../client/run.js");
         return await run({
           argv: rest,
           version: options.version,
@@ -83,6 +137,18 @@ export async function main(options: CliOptions): Promise<ExitCode> {
           paths,
           out,
           err,
+          doctor: async (args) => {
+            const { runDoctor } = await import("./doctor.js");
+            return runDoctor({
+              env,
+              paths,
+              out,
+              err,
+              shell: args.shell,
+              shellVersion: args.shellVersion,
+              pluginLoaded: env["PREFAIX_PLUGIN_LOADED"] === "1",
+            });
+          },
           ...(options.isTty === undefined
             ? {}
             : { stdoutIsTty: options.isTty }),
@@ -94,7 +160,9 @@ export async function main(options: CliOptions): Promise<ExitCode> {
             ? {}
             : { connect: options.connect }),
         });
-      case "daemon":
+      }
+      case "daemon": {
+        const { runDaemon } = await import("./daemon.js");
         return await (options.daemon ?? runDaemon)(rest, {
           env,
           paths,
@@ -102,8 +170,10 @@ export async function main(options: CliOptions): Promise<ExitCode> {
           err,
           version: options.version,
         });
+      }
       case "conversations":
-      case "convs":
+      case "convs": {
+        const { runConversations } = await import("./conversations.js");
         return await runConversations(rest, {
           env,
           paths,
@@ -111,8 +181,9 @@ export async function main(options: CliOptions): Promise<ExitCode> {
           err,
           version: options.version,
         });
+      }
       case "config":
-        return runConfigSubcommand(rest, { env, paths, out, err });
+        return await runConfigSubcommand(rest, { env, paths, out, err });
       case "debug":
         return await runDebugSubcommand(rest, {
           env,
@@ -134,7 +205,7 @@ export async function main(options: CliOptions): Promise<ExitCode> {
   }
 }
 
-function runConfigSubcommand(
+async function runConfigSubcommand(
   argv: readonly string[],
   io: {
     env: Readonly<Record<string, string | undefined>>;
@@ -142,9 +213,10 @@ function runConfigSubcommand(
     out: (text: string) => void;
     err: (text: string) => void;
   },
-): ExitCode {
+): Promise<ExitCode> {
   const [sub, ...rest] = argv;
   if (sub === "check") {
+    const { runConfigCheck } = await import("./config.js");
     const fileIndex = rest.indexOf("--file");
     const file = fileIndex === -1 ? undefined : rest[fileIndex + 1];
     return runConfigCheck({
@@ -175,6 +247,7 @@ async function runDebugSubcommand(
       io.err("prefaix debug tap: a conversation id is required\n");
       return EXIT.usage;
     }
+    const { runTap } = await import("./conversations.js");
     return runTap(target, io);
   }
   io.err(`prefaix debug: unknown subcommand ${JSON.stringify(sub ?? "")}\n`);
@@ -182,4 +255,4 @@ async function runDebugSubcommand(
   return EXIT.usage;
 }
 
-export { daemonStatus, stopDaemon, parseArgs };
+export { parseArgs };

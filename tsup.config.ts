@@ -23,7 +23,9 @@ export default defineConfig(() => {
     outDir: "dist",
     outExtension: () => ({ js: ".js" }),
     sourcemap: true,
-    splitting: false,
+    splitting: true,
+    minify: true,
+    noExternal: ["smol-toml"],
     clean: true,
   };
 });

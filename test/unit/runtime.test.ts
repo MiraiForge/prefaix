@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { STATUS_TEXT, createStatusFiles } from "../../src/daemon/status.js";
-import { resolvePaths } from "../../src/core/paths.js";
+import { resolvePaths, shellRuntimeFiles } from "../../src/core/paths.js";
+import { writeShellStatus } from "../../src/core/status-file.js";
 import {
   VOLATILE_ENV,
   envFingerprint,
@@ -66,6 +67,27 @@ describe("the status file a prompt reads with builtins", () => {
 
   it("reads as no status before the shell has run a turn", async () => {
     expect(await createStatusFiles(paths).readStatus(SHELL_ID)).toBeUndefined();
+  });
+
+  it("publishes complete rich status across concurrent writers without temporary files", async () => {
+    const labels = ["prefaix · fake-fast · idle", "prefaix · error"];
+    await Promise.all(
+      labels.map((label) => writeShellStatus(paths, SHELL_ID, label)),
+    );
+    const { dir, status } = shellRuntimeFiles(paths, SHELL_ID);
+    expect(labels).toContain((await readFile(status, "utf8")).trim());
+    expect(await readdir(dir)).toEqual(["status"]);
+    expect((await stat(status)).mode & 0o777).toBe(0o600);
+  });
+
+  it("validates shell ids and removes temporary files when publication fails", async () => {
+    await expect(
+      writeShellStatus(paths, "../outside", "status"),
+    ).rejects.toThrow("Invalid shell id");
+    const { dir, status } = shellRuntimeFiles(paths, SHELL_ID);
+    await mkdir(status, { recursive: true });
+    await expect(writeShellStatus(paths, SHELL_ID, "status")).rejects.toThrow();
+    expect(await readdir(dir)).toEqual(["status"]);
   });
 
   it("reads an unrecognized file as no status rather than guessing", async () => {

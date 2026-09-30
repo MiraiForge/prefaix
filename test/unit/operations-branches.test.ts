@@ -6,7 +6,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentPool } from "../../src/daemon/pool.js";
 import { ConversationStore } from "../../src/daemon/store.js";
 import { TurnManager } from "../../src/daemon/turns.js";
@@ -24,6 +24,7 @@ import type {
   Capabilities,
   ModelInfo,
   NativeRef,
+  OpenOptions,
 } from "../../src/core/agent-port.js";
 import type { Connection } from "../../src/daemon/server.js";
 import type { DaemonMessage, TurnSummary } from "../../src/core/protocol.js";
@@ -140,6 +141,7 @@ class StubBackend implements AgentBackend {
   readonly id = "stub";
   readonly capabilities = CAPABILITIES;
   readonly sessions: StubSession[] = [];
+  readonly opened: OpenOptions[] = [];
   bare = false;
   /** Armed before the turn starts, so a fresh session is taught to fail too. */
   throwOnPrompt: Error | undefined;
@@ -153,7 +155,8 @@ class StubBackend implements AgentBackend {
     };
   }
 
-  async open(): Promise<AgentSession> {
+  async open(options?: OpenOptions): Promise<AgentSession> {
+    if (options !== undefined) this.opened.push(options);
     const session = this.bare ? new BareSession() : new StubSession();
     session.throwOnPrompt = this.throwOnPrompt;
     this.sessions.push(session);
@@ -185,13 +188,13 @@ function operations(
     config: defaultConfig(),
     version: "0.0.0-test",
     startedAt: 1_000,
-    ...overrides,
     send: (_connection, message) => {
       sent.push(message);
     },
     onEnd: (_turn, summary, info) => {
       ended.push({ summary, root: info.root });
     },
+    ...overrides,
   });
 }
 
@@ -202,11 +205,16 @@ function splitPolicy(): ReturnType<typeof defaultConfig> {
   };
 }
 
-const shell = { kind: "zsh", version: "5.9", shellId: "1-1-a", pid: 1 };
+const shell = {
+  kind: "zsh" as const,
+  version: "5.9",
+  shellId: "1-1-a",
+  pid: 1,
+};
 const context = {
   recent: [],
   os: "macOS",
-  term: { cols: 100, rows: 30, colors: 256 },
+  term: { cols: 100, rows: 30, colors: 256 as const },
 };
 
 async function startTurn(
@@ -267,7 +275,10 @@ function storeThatCannotWrite(): ConversationStore {
     lastInRoot: (root: string) => real.lastInRoot(root),
     remove: (id: string) => real.remove(id),
     save: (record: Parameters<typeof real.save>[0]) => real.save(record),
-    update: () => Promise.reject(new Error("disk is full")),
+    update: (id: string, patch: Parameters<typeof real.update>[1]) =>
+      patch.stats === undefined
+        ? real.update(id, patch)
+        : Promise.reject(new Error("disk is full")),
   } as unknown as ConversationStore;
 }
 
@@ -353,7 +364,6 @@ describe("a turn whose agent breaks", () => {
         (event) => event?.type === "notice" && event.level === "error",
       ),
     ).toHaveLength(1);
-    console.error("DBG events", JSON.stringify(events()));
     expect(ended.at(-1)?.summary).toMatchObject({
       status: "error",
       error: "the model fell over",
@@ -451,6 +461,123 @@ describe("a turn whose agent breaks", () => {
 });
 
 describe("a client that goes away mid-turn", () => {
+  it("keeps replay metadata consistent when the live ring changes while the reader waits", async () => {
+    const live = new TurnManager({ ringBytes: 128 });
+    const turn = live.start({ conversationId: "live", shellId: "1-1-a" });
+    live.publish(turn, { type: "turn_start" });
+    live.publish(turn, { type: "text_delta", block: 0, text: "first" });
+    const drained = gate();
+    let blocked = true;
+    const owner: Connection = {
+      ...connection("replay"),
+      waitWritable: () => (blocked ? drained.promise : undefined),
+    };
+    const pending = operations({ turns: live }).turnAttach(
+      { conversationId: "live", fromSeq: 0 },
+      owner,
+    );
+    live.publish(turn, {
+      type: "text_delta",
+      block: 0,
+      text: "later".repeat(100),
+    });
+    live.publish(turn, { type: "settled", stopReason: "stop" });
+    live.finish(turn, { turnId: turn.id, status: "stop" });
+    expect(turn.ring.oldestSeq).toBeGreaterThan(1);
+    blocked = false;
+    drained.open();
+    expect(await pending).toEqual({ turnId: turn.id, fromSeq: 1 });
+    expect(events()).toEqual([
+      { type: "turn_start" },
+      { type: "text_delta", block: 0, text: "first" },
+    ]);
+    expect(sent.every((message) => message.t === "evt")).toBe(true);
+  });
+
+  it("stops requesting live events while the connection is backpressured", async () => {
+    const drained = gate();
+    const waiting = gate();
+    let blocked = true;
+    let observedSignal: AbortSignal | undefined;
+    const owner: Connection = {
+      ...connection("blocked"),
+      waitWritable: (signal) => {
+        if (!blocked) return;
+        observedSignal = signal;
+        waiting.open();
+        return drained.promise;
+      },
+    };
+    const ops = operations();
+    const started = await ops.turnStart(
+      {
+        shell,
+        cwd: home,
+        env: { PATH: "/usr/bin" },
+        text: "hello",
+        context,
+      },
+      owner,
+    );
+    backend.sessions[0]!.flush();
+    await waiting.promise;
+    try {
+      expect(events()).toEqual([{ type: "turn_start" }]);
+      expect(observedSignal).toBe(turns.get(started.turnId)!.controller.signal);
+    } finally {
+      blocked = false;
+      drained.open();
+    }
+    await settleTurn(started.turnId);
+    expect(events().map((event) => event?.type)).toEqual([
+      "turn_start",
+      "text_delta",
+      "text_end",
+      "usage",
+      "settled",
+    ]);
+  });
+
+  it.each([false, true])(
+    "waits during replay and stops if the reader closes: %s",
+    async (close) => {
+      const ops = operations();
+      const started = await startTurn(ops);
+      await settleTurn(started.turnId);
+      sent = [];
+      const drained = gate();
+      let blocked = true;
+      let closed = false;
+      const owner: Connection = {
+        ...connection("replay"),
+        get closed() {
+          return closed;
+        },
+        waitWritable: () => (blocked ? drained.promise : undefined),
+      };
+      const attached = ops.turnAttach(
+        { conversationId: started.conversationId, fromSeq: 0 },
+        owner,
+      );
+      expect(events()).toEqual([{ type: "turn_start" }]);
+      blocked = false;
+      closed = close;
+      drained.open();
+      await attached;
+      if (close) expect(sent).toHaveLength(1);
+      else {
+        expect(events().map((event) => event?.type)).toEqual([
+          "turn_start",
+          "text_delta",
+          "text_end",
+          "usage",
+          "settled",
+        ]);
+        expect(sent.at(-1)?.t).toBe("turn.end");
+      }
+    },
+  );
+
   it("aborts the turns it owned and leaves the rest alone", async () => {
     const ops = operations();
     const mine = await startTurn(ops, {}, "c1");
@@ -504,6 +631,9 @@ describe("capabilities the agent does not have", () => {
     await expect(
       ops.thinkingSet({ conversationId, level: "high" }),
     ).rejects.toThrow(/think/);
+    await expect(ops.thinkingList({ conversationId })).rejects.toThrow(
+      /think/u,
+    );
     await expect(ops.commandsList({ conversationId })).rejects.toThrow(/skill/);
   });
 
@@ -618,6 +748,27 @@ describe("a cwd that is not the conversation's root", () => {
 });
 
 describe("the status file a shell reads", () => {
+  it("finishes background status publication before releasing the foreground", async () => {
+    const publishing = gate();
+    const release = gate();
+    const ops = operations({
+      onEnd: async () => {
+        publishing.open();
+        await release.promise;
+      },
+    });
+    const { turnId } = await startTurn(ops);
+    const releasedForeground = () =>
+      sent.some(
+        (message) => message.t === "turn.end" && message.turnId === turnId,
+      );
+    for (const session of backend.sessions) session.flush();
+    await publishing.promise;
+    expect(releasedForeground()).toBe(false);
+    release.open();
+    await waitFor(releasedForeground);
+  });
+
   it("is empty once the shell is done with it", async () => {
     const status = createStatusFiles(paths);
     await status.writeStatus("1-1-a", "running");
@@ -626,6 +777,197 @@ describe("the status file a shell reads", () => {
     expect(await status.readStatus("1-1-a")).toBeUndefined();
     // A shell that never ran a turn has no file, and clearing it is a no-op.
     await expect(status.clearStatus("2-2-b")).resolves.toBeUndefined();
+  });
+});
+
+describe("durable turn ownership", () => {
+  it("preserves a concurrent rename while a child is opening", async () => {
+    const ops = operations();
+    const created = await ops.convNew({ shell, cwd: home, env: {} });
+    await store.update(created.id, { title: "original title" });
+    const opening = gate();
+    const release = gate();
+    const acquire = pool.acquire.bind(pool);
+    vi.spyOn(pool, "acquire").mockImplementation(async (request) => {
+      opening.open();
+      await release.promise;
+      return acquire(request);
+    });
+    const starting = startTurn(ops, { conversationId: created.id });
+    await opening.promise;
+    await store.update(created.id, { title: "renamed by another shell" });
+    release.open();
+    const { turnId } = await starting;
+    try {
+      expect((await store.get(created.id))?.title).toBe(
+        "renamed by another shell",
+      );
+    } finally {
+      await settleTurn(turnId);
+    }
+  });
+
+  it("reopens the stored native transcript after recreating daemon state", async () => {
+    const firstOps = operations();
+    const first = await startTurn(firstOps);
+    await settleTurn(first.turnId);
+    await firstOps.drain();
+    await pool.close();
+    backend = new StubBackend();
+    pool = new AgentPool({ backend, config: defaultConfig(), spare: false });
+    turns = new TurnManager();
+    store = new ConversationStore({ paths });
+    const restarted = operations();
+    const next = await startTurn(restarted, {
+      conversationId: first.conversationId,
+    });
+    expect(backend.opened[0]?.resume).toEqual({ sessionId: "stub" });
+    expect(next.conversationId).toBe(first.conversationId);
+    expect((await store.get(next.conversationId))?.stats.turns).toBe(1);
+    await settleTurn(next.turnId);
+    await restarted.drain();
+    expect((await store.get(next.conversationId))?.stats.turns).toBe(2);
+  });
+
+  it("persists the native handle before the first prompt settles", async () => {
+    const ops = operations();
+    const { turnId, conversationId } = await startTurn(ops);
+    try {
+      expect((await store.get(conversationId))?.native).toEqual({
+        sessionId: "stub",
+      });
+      expect(turns.runningFor(conversationId)?.id).toBe(turnId);
+    } finally {
+      await settleTurn(turnId);
+    }
+  });
+
+  it("keeps the conversation busy while its outcome is being persisted", async () => {
+    const reading = gate();
+    const release = gate();
+    const ops = operations();
+    const { turnId, conversationId } = await startTurn(ops);
+    (backend.sessions[0] as StubSession).state = async () => {
+      reading.open();
+      await release.promise;
+      return { busy: false };
+    };
+    backend.sessions[0]?.flush();
+    await reading.promise;
+    try {
+      expect(turns.runningFor(conversationId)?.id).toBe(turnId);
+      await expect(startTurn(ops, { conversationId })).rejects.toMatchObject({
+        code: "CONVERSATION_BUSY",
+      });
+    } finally {
+      release.open();
+      await settleTurn(turnId);
+    }
+  });
+
+  it("refuses to prompt if the native handle cannot be persisted", async () => {
+    const ops = operations();
+    vi.spyOn(store, "update").mockRejectedValue(new Error("disk is full"));
+    await expect(startTurn(ops)).rejects.toThrow("disk is full");
+    expect(events()).toEqual([]);
+    expect(turns.count).toBe(0);
+    expect(ended).toEqual([]);
+  });
+
+  it("reports a failed outcome write and still releases the conversation", async () => {
+    const ops = operations();
+    const { turnId, conversationId } = await startTurn(ops);
+    vi.spyOn(store, "update").mockRejectedValue(new Error("disk is full"));
+    await settleTurn(turnId);
+    expect(ended.at(-1)?.summary).toMatchObject({
+      status: "error",
+      error: expect.stringContaining("disk is full"),
+    });
+    await waitFor(() => turns.runningFor(conversationId) === undefined);
+    expect(sent.find((message) => message.t === "turn.end")).toMatchObject({
+      summary: { status: "error" },
+    });
+  });
+
+  it("drains finalization and rejects starts after shutdown begins", async () => {
+    const publishing = gate();
+    const release = gate();
+    const ops = operations({
+      onEnd: async () => {
+        publishing.open();
+        await release.promise;
+      },
+    });
+    await startTurn(ops);
+    backend.sessions[0]?.flush();
+    await publishing.promise;
+    try {
+      ops.beginShutdown();
+      let drained = false;
+      const draining = ops.drain().then(() => {
+        drained = true;
+      });
+      await Promise.resolve();
+      expect(drained).toBe(false);
+      await expect(startTurn(ops)).rejects.toMatchObject({
+        code: "DAEMON_UNAVAILABLE",
+      });
+      release.open();
+      await draining;
+      expect(drained).toBe(true);
+      expect(turns.count).toBe(0);
+    } finally {
+      release.open();
+      await waitFor(() => turns.count === 0);
+    }
+  });
+
+  it("drains a pending startup without opening a child after shutdown", async () => {
+    const resolving = gate();
+    const release = gate();
+    const ops = operations({
+      gitRoot: {
+        run: async () => {
+          resolving.open();
+          await release.promise;
+          return home;
+        },
+      },
+    });
+    const starting = startTurn(ops);
+    const rejected = expect(starting).rejects.toMatchObject({
+      code: "DAEMON_UNAVAILABLE",
+    });
+    await resolving.promise;
+    ops.beginShutdown();
+    let drained = false;
+    const draining = ops.drain().then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    release.open();
+    await Promise.all([draining, rejected]);
+    expect(backend.sessions).toEqual([]);
+  });
+
+  it("releases ownership even when the final status hook fails", async () => {
+    const ops = operations({
+      onEnd: () => {
+        throw new Error("status unavailable");
+      },
+    });
+    const { turnId, conversationId } = await startTurn(ops);
+    backend.sessions[0]?.flush();
+    await waitFor(() => sent.some((message) => message.t === "turn.end"));
+    expect(turns.runningFor(conversationId)).toBeUndefined();
+    expect(sent.find((message) => message.t === "turn.end")).toMatchObject({
+      turnId,
+      summary: {
+        status: "error",
+        error: "could not finalize the turn: status unavailable",
+      },
+    });
   });
 });
 
@@ -648,7 +990,10 @@ describe("a cause that is not an error", () => {
   it("is still logged when the record cannot be written", async () => {
     const messages: string[] = [];
     const failing = Object.create(storeThatCannotWrite()) as ConversationStore;
-    failing.update = () => Promise.reject("the disk said no");
+    failing.update = (id, patch) =>
+      patch.stats === undefined
+        ? store.update(id, patch)
+        : Promise.reject("the disk said no");
     const ops = operations({
       store: failing,
       log: (message) => messages.push(message),
@@ -845,5 +1190,117 @@ describe("the status a client reads", () => {
     clock = 5_000;
     const ops = operations({ now: () => clock });
     expect((await ops.statusGet({})).uptimeMs).toBe(4_000);
+  });
+});
+
+describe("M3 operation failure isolation", () => {
+  it("releases a registered turn when opening the backend fails", async () => {
+    const ops = operations();
+    const created = await ops.convNew({
+      shell: shell as never,
+      cwd: home,
+      env: {},
+    });
+    const open = backend.open.bind(backend);
+    backend.open = async () => {
+      throw new Error("backend executable disappeared");
+    };
+    await expect(
+      startTurn(ops, { conversationId: created.id }),
+    ).rejects.toThrow(/disappeared/u);
+    expect(turns.count).toBe(0);
+    expect(turns.runningFor(created.id)).toBeUndefined();
+    backend.open = open;
+    const started = await startTurn(ops, { conversationId: created.id });
+    await settleTurn(started.turnId);
+  });
+  it("checks slash, model and thinking capabilities before attempting unsupported operations", async () => {
+    const custom = new AgentPool({
+      backend: {
+        ...backend,
+        id: "limited",
+        capabilities: {
+          ...CAPABILITIES,
+          slashCommands: false,
+          models: false,
+          thinkingLevels: false,
+        },
+        probe: () => backend.probe(),
+        open: () => backend.open(),
+      },
+      config: defaultConfig(),
+    });
+    const ops = operations({ pool: custom });
+    await expect(startTurn(ops, { text: "/review" })).rejects.toThrow(
+      /slashCommands/u,
+    );
+    const created = await ops.convNew({
+      shell: shell as never,
+      cwd: home,
+      env: {},
+    });
+    await expect(ops.modelList({ conversationId: created.id })).rejects.toThrow(
+      /models/u,
+    );
+    await expect(
+      ops.modelSet({
+        conversationId: created.id,
+        ref: { provider: "test", id: "none" },
+      }),
+    ).rejects.toThrow(/models/u);
+    await expect(
+      ops.thinkingSet({ conversationId: created.id, level: "high" }),
+    ).rejects.toThrow(/thinkingLevels/u);
+    expect(turns.count).toBe(0);
+    await custom.close();
+  });
+  it("omits levels for a backend that supports models but not thinking", async () => {
+    const custom = new AgentPool({
+      backend: {
+        ...backend,
+        id: "limited",
+        capabilities: { ...CAPABILITIES, thinkingLevels: false },
+        probe: () => backend.probe(),
+        open: () => backend.open(),
+      },
+      config: defaultConfig(),
+    });
+    const ops = operations({ pool: custom });
+    const created = await ops.convNew({
+      shell: shell as never,
+      cwd: home,
+      env: {},
+    });
+    const models = await ops.modelList({ conversationId: created.id, env: {} });
+    expect(models.thinkingLevels).toBeUndefined();
+    await custom.close();
+  });
+});
+
+describe("agent command discovery without a model request", () => {
+  it("closes a temporary discovery session without creating a conversation", async () => {
+    const ops = operations();
+    const open = backend.open.bind(backend);
+    backend.open = async () => {
+      const session = await open();
+      session.listCommands = async () => [{ name: "review", kind: "skill" }];
+      return session;
+    };
+    const result = await ops.commandsList({
+      cwd: home,
+      env: { PATH: "/usr/bin" },
+    });
+    expect(result.commands).toBeDefined();
+    expect(backend.sessions).toHaveLength(1);
+    expect(backend.sessions[0]?.closed).toBe(true);
+    expect(await store.list()).toEqual([]);
+    expect(turns.count).toBe(0);
+  });
+  it("closes temporary sessions even when command discovery is unsupported", async () => {
+    backend.bare = true;
+    await expect(
+      operations().commandsList({ cwd: home, env: {} }),
+    ).rejects.toThrow(/skill/u);
+    expect(backend.sessions[0]?.closed).toBe(true);
   });
 });

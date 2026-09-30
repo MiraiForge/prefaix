@@ -473,16 +473,16 @@ describe("a turn, end to end", () => {
     expect(readDirectives()["buffer"]).toBe("git status");
   });
 
-  it("puts back the agent's own buffer rather than the typeahead", async () => {
+  it("preserves the agent buffer and the user's distinct typeahead", async () => {
     await startDaemon({ env: { PREFAIX_FAKE_SCENARIO: "buffer" } });
     const tty = fakeTty();
     const running = runClient(": give me something to run", { tty });
     await new Promise((resolve) => setTimeout(resolve, 10));
     tty.send("half typed");
     expect(await running).toBe(EXIT.ok);
-    // The agent asked for a specific buffer, so that is what the shell gets;
-    // the user's half-typed line would be the wrong thing to restore.
-    expect(readDirectives()["buffer"]).not.toBe("half typed");
+    expect(readDirectives()["buffer"]).toBe(
+      "git push --force-with-lease origin main\nhalf typed",
+    );
   });
 
   it("redacts with the patterns the config adds", async () => {
@@ -657,7 +657,7 @@ describe("commands the client carries out itself", () => {
     await startDaemon();
     // `zzzzzzzz` is not close to any command, so it is a question about
     // something called zzzzzzzz rather than a typo.
-    expect(await runClient(":zzzzzzzz")).toBe(EXIT.ok);
+    expect(await runClient(": zzzzzzzz")).toBe(EXIT.ok);
     expect(out.join("")).toContain("Hello from the fake backend");
     expect(err.join("")).not.toContain("not a command");
   });
@@ -705,11 +705,10 @@ describe("a persona", () => {
     expect(out.join("")).toContain("Hello from the fake backend");
   });
 
-  it("treats an unknown leading word as a prompt rather than a bad persona", async () => {
+  it("rejects an unknown tight persona name rather than prompting", async () => {
     await startDaemon();
-    // `audit` is not a configured persona, so the line is a question, not a
-    // request for a persona nobody defined.
-    expect(await runClient(":audit the deps")).toBe(EXIT.ok);
+    expect(await runClient(":audit the deps")).toBe(EXIT.usage);
+    expect(err.join("")).toContain("is not a command");
   });
 });
 

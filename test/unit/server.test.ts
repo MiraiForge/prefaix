@@ -165,6 +165,95 @@ describe("the socket file", () => {
 });
 
 describe("a client that misbehaves", () => {
+  it("waits for a paused reader and delivers every queued byte when it resumes", async () => {
+    await start();
+    const socket = await client(
+      '{"t":"hello","v":1,"version":"0.0.0-test","pid":7}\n',
+    );
+    socket.pause();
+    try {
+      await waitFor(() => messages.length === 1);
+      const connection = messages[0]!.connection;
+      expect(connection.waitWritable?.()).toBeUndefined();
+      const message = {
+        t: "evt" as const,
+        turnId: "burst",
+        seq: 1,
+        e: {
+          type: "text_delta" as const,
+          block: 0,
+          text: "text\n".repeat(200_000),
+        },
+      };
+      connection.send(message);
+      const pending = connection.waitWritable?.();
+      expect(pending).toBeInstanceOf(Promise);
+      let drained = false;
+      void pending!.then(() => {
+        drained = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(drained).toBe(false);
+      let received = "";
+      socket.on("data", (data: string) => {
+        received += data;
+      });
+      socket.resume();
+      await pending;
+      await waitFor(() => received.endsWith("\n"));
+      expect(JSON.parse(received)).toEqual(message);
+      expect(connection.waitWritable?.()).toBeUndefined();
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  it.each(["disconnect", "half-close", "local-close", "abort"])(
+    "releases a blocked writer on %s",
+    async (mode) => {
+      await start();
+      const socket = await client(
+        '{"t":"hello","v":1,"version":"0.0.0-test","pid":7}\n',
+      );
+      socket.pause();
+      try {
+        await waitFor(() => messages.length === 1);
+        const connection = messages[0]!.connection;
+        const controller = new AbortController();
+        connection.send({
+          t: "evt",
+          turnId: "burst",
+          seq: 1,
+          e: { type: "text_delta", block: 0, text: "x".repeat(1_000_000) },
+        });
+        const pending = connection.waitWritable?.(controller.signal);
+        expect(pending).toBeInstanceOf(Promise);
+        let released = false;
+        void pending!.then(() => {
+          released = true;
+        });
+        if (mode === "disconnect") socket.destroy();
+        else if (mode === "half-close") socket.end();
+        else if (mode === "local-close") connection.close();
+        else controller.abort();
+        await waitFor(() => released);
+        await pending;
+        if (mode !== "abort") {
+          expect(connection.closed).toBe(true);
+          expect(connection.waitWritable?.()).toBeUndefined();
+          expect(() =>
+            connection.send({ t: "hello", v: 1, version: "test", pid: 1 }),
+          ).not.toThrow();
+        } else {
+          expect(connection.closed).toBe(false);
+          expect(connection.waitWritable?.(controller.signal)).toBeUndefined();
+        }
+      } finally {
+        socket.destroy();
+      }
+    },
+  );
+
   it("ignores a line that is not a protocol message", async () => {
     await start();
     const socket = await client("this is not json\n");

@@ -16,9 +16,16 @@ import { loadConfig, personaSpec } from "../core/config/index.js";
 import type { PrefaixConfig } from "../core/config/schema.js";
 import { resolvePaths } from "../core/paths.js";
 import type { PrefaixPaths } from "../core/paths.js";
+import { writeShellStatus } from "../core/status-file.js";
 import { buildContext } from "../context/shell-context.js";
 import { filterEnv } from "../context/env.js";
-import { parseLine, suggestions, type Parsed } from "../shells/grammar.js";
+import {
+  parseLine,
+  suggestions,
+  COMMAND_NAMES,
+  COMMANDS,
+  type Parsed,
+} from "../shells/grammar.js";
 import { encodeDirectives, type Directives } from "../shells/directives.js";
 import { DaemonClient } from "./connection.js";
 import { TtyController, installExitGuards, type RawModeTarget } from "./tty.js";
@@ -27,8 +34,26 @@ import { capabilities } from "./render/theme.js";
 import type { FooterField } from "./render/chrome.js";
 import type { DialogIo } from "./render/dialogs.js";
 import type { DialogRequest } from "./render/dialogs.js";
-import type { ShellKind, UiResponse } from "../core/agent-port.js";
-import type { StatusSnapshot, TurnSummary } from "../core/protocol.js";
+import type {
+  AgentCommand,
+  ShellKind,
+  UiResponse,
+} from "../core/agent-port.js";
+import type {
+  ConversationSummary,
+  ModelListResult,
+  StatusSnapshot,
+  TurnSummary,
+} from "../core/protocol.js";
+import { pick, type PickItem } from "./picker.js";
+import { copyText } from "./clipboard.js";
+import { plain } from "./process.js";
+import {
+  cacheCommands,
+  cachedCommands,
+  commandAlias,
+  commandPrompt,
+} from "./agent-commands.js";
 
 export interface RunArgs {
   readonly shell: ShellKind;
@@ -36,6 +61,7 @@ export interface RunArgs {
   readonly shellVersion: string;
   readonly shellPid: number;
   readonly conversationId: string;
+  readonly previousConversationId: string;
   readonly nonce: string;
   readonly directives: string;
   readonly cwd: string;
@@ -61,6 +87,12 @@ export interface RunOptions {
     paths: PrefaixPaths;
     version: string;
   }) => DaemonClient;
+  readonly doctor?: (args: RunArgs) => Promise<ExitCode>;
+  readonly picker?: (
+    items: readonly PickItem[],
+    title: string,
+  ) => Promise<string | undefined>;
+  readonly clipboard?: (text: string) => Promise<void>;
   readonly dialogs?: DialogIo;
   readonly sleep?: (ms: number) => Promise<void>;
 }
@@ -129,6 +161,7 @@ export function parseRunArgs(argv: readonly string[]): RunArgs {
     shellVersion: flag("shell-version", "unknown"),
     shellPid: Number.isInteger(pid) && pid > 0 ? pid : process.pid,
     conversationId: flag("conversation", ""),
+    previousConversationId: flag("previous-conversation", ""),
     nonce: flag("nonce", ""),
     directives: flag("directives", ""),
     cwd: flag("cwd", process.cwd()),
@@ -157,6 +190,49 @@ export async function run(options: RunOptions): Promise<ExitCode> {
   }
 
   const paths = options.paths ?? resolvePaths({ env });
+  const local = parseLine(args.line);
+  if (
+    local.kind === "command" &&
+    local.args.trim() !== "" &&
+    COMMANDS.some(
+      (command) =>
+        !command.takesArgs &&
+        (command.name === local.name || command.aliases.includes(local.name)),
+    )
+  ) {
+    err(
+      `prefaix: :${local.name} does not take arguments. Use ': <text>' to send a prompt.\n`,
+    );
+    await writeDirectives(args.directives, { nonce: args.nonce });
+    return EXIT.usage;
+  }
+  if (
+    local.kind === "command" &&
+    ["help", "?", "doctor"].includes(local.name)
+  ) {
+    const exit =
+      local.name === "doctor"
+        ? await (options.doctor?.(args) ?? Promise.resolve(EXIT.usage))
+        : (HELP_LINES.forEach((line) => out(`${line}\n`)), EXIT.ok);
+    if (local.name !== "doctor") {
+      const commands = await cachedCommands(paths, args.conversationId);
+      if (commands.length > 0) {
+        out("\nagent commands (cached for this conversation):\n");
+        for (const command of commands)
+          out(
+            `  :${commandAlias(command)}${command.description === undefined ? "" : ` — ${plain(command.description)}`}\n`,
+          );
+      } else
+        out(
+          "\nAgent commands: use :/<name> [args]; run a turn to cache this conversation's available commands.\n",
+        );
+    }
+    if (local.name === "doctor" && options.doctor === undefined)
+      err("prefaix: doctor is unavailable in this client host\n");
+    await writeDirectives(args.directives, { nonce: args.nonce });
+    return exit;
+  }
+
   let config: PrefaixConfig;
   try {
     config = options.config ?? loadConfig({ env, file: paths.configFile });
@@ -206,7 +282,6 @@ export async function run(options: RunOptions): Promise<ExitCode> {
     ...(options.dialogs === undefined ? {} : { dialogs: options.dialogs }),
   });
 
-  const configFile = paths.configFile;
   const connect =
     options.connect ??
     ((clientOptions) =>
@@ -227,22 +302,41 @@ export async function run(options: RunOptions): Promise<ExitCode> {
   try {
     await client.connect();
 
+    let text: string | undefined;
+    let persona: string | undefined;
+    let conversationId = args.conversationId;
+    exit = EXIT.ok;
     if (parsed.kind === "command") {
-      exit = await runCommand(
+      const result = await runCommand(
         parsed,
         client,
         renderer,
         args,
         env,
         err,
-        configFile,
+        config,
+        options,
       );
-      if (exit === EXIT.ok && parsed.class === "run") {
-        directives.conversation = args.conversationId;
-      }
+      exit = result.exit;
+      conversationId = result.conversationId ?? conversationId;
+      if (conversationId !== "") directives.conversation = conversationId;
+      text = result.text;
     } else if (parsed.kind === "agent") {
-      // A slash command is the agent's own; prefaix sends it as a prompt and
-      // lets the backend expand it (DESIGN §4.5.5).
+      text = `/${parsed.name} ${parsed.args}`.trim();
+    } else {
+      if (
+        parsed.persona !== undefined &&
+        personaSpec(config, parsed.persona) === undefined
+      ) {
+        throw new PrefaixError(
+          "USAGE",
+          `unknown persona ${JSON.stringify(parsed.persona)}`,
+        );
+      }
+      persona = parsed.persona;
+      text = parsed.text;
+    }
+    if (text !== undefined) {
       const controller = new AbortController();
       tty = startTty(options, controller, renderer);
       releaseGuards = installExitGuards(() => tty?.restore());
@@ -252,63 +346,66 @@ export async function run(options: RunOptions): Promise<ExitCode> {
         client,
         renderer,
         config,
-        args,
+        args: { ...args, conversationId },
         env,
-        text: `/${parsed.name} ${parsed.args}`.trim(),
+        text,
         controller,
         setTurnId: (id) => {
           turnId = id;
         },
+        setConversationId: (id) => {
+          directives.conversation = id;
+        },
+        ...(persona === undefined ? {} : { persona }),
       });
       exit = result.exit;
-      directives.conversation = result.conversationId;
-      directives.buffer = bufferFrom(renderer, tty);
-    } else {
-      const persona =
-        parsed.persona === undefined
-          ? undefined
-          : personaSpec(config, parsed.persona);
-      if (parsed.persona !== undefined && persona === undefined) {
-        // A persona the config does not define is a usage error, not a turn the
-        // agent will refuse: nothing has been sent yet.
-        err(`unknown persona ${JSON.stringify(parsed.persona)}\n`);
-        exit = EXIT.usage;
-      } else {
-        const controller = new AbortController();
-        tty = startTty(options, controller, renderer);
-        releaseGuards = installExitGuards(() => tty?.restore());
-        tty.enter();
-        renderer.begin();
-        const result = await runTurn({
-          client,
-          renderer,
-          config,
-          args,
-          env,
-          text: parsed.text,
-          controller,
-          setTurnId: (id) => {
-            turnId = id;
-          },
-          ...(persona === undefined ? {} : { persona: persona.name }),
-        });
-        exit = result.exit;
-        directives.conversation = result.conversationId;
-        const buffer = bufferFrom(renderer, tty);
-        if (buffer !== "") {
-          directives.buffer = buffer;
-        }
-      }
+      conversationId = result.conversationId;
+    }
+    if (conversationId !== "") {
+      directives.conversation = conversationId;
+      await client.call("conv.select", {
+        conversationId,
+        shell: shellInfo(args),
+        previousConversationId: args.conversationId,
+      });
+      const status = await client.call<StatusSnapshot>("status.get", {
+        conversationId,
+      });
+      const commands = await client
+        .call<{ commands: AgentCommand[] }>("commands.list", { conversationId })
+        .catch(() => undefined);
+      if (commands !== undefined)
+        await cacheCommands(paths, conversationId, commands.commands);
+      directives.status = statusLabel({
+        ...status,
+        state:
+          exit === EXIT.aborted
+            ? "aborted"
+            : exit === EXIT.agentError
+              ? "error"
+              : status.state,
+      });
     }
   } catch (cause) {
     exit = cause instanceof PrefaixError ? cause.exitCode : EXIT.agentError;
+    directives.status = "prefaix · error";
     err(`${messageOf(cause)}\n`);
     if (cause instanceof PrefaixError && cause.hint !== undefined) {
       err(`${cause.hint}\n`);
     }
   } finally {
+    // Prompt hooks refresh from this file after applying the directives. The
+    // foreground owns the final rich status once the daemon ends the turn.
+    if (directives.status !== undefined) {
+      await writeShellStatus(paths, args.shellId, directives.status).catch(
+        () => undefined,
+      );
+    }
     releaseGuards?.();
     tty?.restore();
+    const buffer = bufferFrom(renderer, tty);
+    if (buffer !== "") directives.buffer = buffer;
+    renderer.close();
     client.close();
   }
 
@@ -332,12 +429,12 @@ function bufferFrom(
   tty: TtyController | undefined,
 ): string {
   const fromAgent = renderer.takeBuffer();
-  if (fromAgent !== "") {
-    return fromAgent;
-  }
-  // Typeahead is the user's own half-typed line, and it belongs in the prompt
-  // they will see next, not in the stream they just scrolled past.
-  return tty?.takeCaptured() ?? "";
+  const captured = tty?.takeCaptured() ?? "";
+  // Drain once, after restore has flushed the decoder and stopped input. A
+  // distinct user line remains distinct from an agent-provided suggestion.
+  return fromAgent !== "" && captured !== ""
+    ? `${fromAgent}\n${captured}`
+    : fromAgent + captured;
 }
 
 function startTty(
@@ -377,6 +474,7 @@ interface TurnOptions {
   readonly persona?: string;
   readonly controller: AbortController;
   readonly setTurnId: (turnId: string) => void;
+  readonly setConversationId: (conversationId: string) => void;
 }
 
 interface TurnRun {
@@ -407,10 +505,13 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
     config.env,
   );
 
-  const ended = new Promise<TurnSummary>((resolve) => {
+  const ended = new Promise<TurnSummary>((resolve, reject) => {
     client.onTurnEnd((_turnId, summary) => resolve(summary));
+    client.onClose(reject);
   });
-  client.onEvent((_turnId, { event }) => {
+  ended.catch(() => undefined);
+  client.onEvent((turnId, { event }) => {
+    options.setTurnId(turnId);
     renderer.handle(event);
   });
 
@@ -433,6 +534,7 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
     },
   );
   options.setTurnId(started.turnId);
+  options.setConversationId(started.conversationId);
 
   // Esc aborts locally and tells the daemon, so the turn ends even if the client
   // dies on the way out.
@@ -443,12 +545,17 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
   };
   options.controller.signal.addEventListener("abort", onAbort, { once: true });
 
-  const summary = await ended;
-  options.controller.signal.removeEventListener("abort", onAbort);
-  return {
-    conversationId: started.conversationId,
-    exit: exitForSummary(summary),
-  };
+  if (options.controller.signal.aborted) onAbort();
+  try {
+    const summary = await ended;
+    return {
+      conversationId: started.conversationId,
+      exit: exitForSummary(summary),
+    };
+  } finally {
+    options.controller.signal.removeEventListener("abort", onAbort);
+    client.onClose(() => undefined);
+  }
 }
 
 function exitForSummary(summary: TurnSummary): ExitCode {
@@ -463,7 +570,21 @@ function exitForSummary(summary: TurnSummary): ExitCode {
   }
 }
 
-/** The commands this milestone can carry out. */
+interface CommandResult {
+  exit: ExitCode;
+  conversationId?: string;
+  text?: string;
+}
+
+function shellInfo(args: RunArgs) {
+  return {
+    kind: args.shell,
+    version: args.shellVersion,
+    shellId: args.shellId,
+    pid: args.shellPid,
+  };
+}
+
 async function runCommand(
   parsed: Extract<Parsed, { kind: "command" }>,
   client: DaemonClient,
@@ -471,83 +592,212 @@ async function runCommand(
   args: RunArgs,
   env: Readonly<Record<string, string | undefined>>,
   err: (text: string) => void,
-  configFile: string,
-): Promise<ExitCode> {
+  config: PrefaixConfig,
+  options: RunOptions,
+): Promise<CommandResult> {
   if (parsed.summary === "unknown command") {
-    // A name prefaix has never heard of, and the grammar only gets here when
-    // something close exists, so the suggestion is always worth giving.
-    err(
-      `prefaix: :${parsed.name} is not a command. Did you mean ${suggestions(
-        parsed.name,
-      )
-        .map((name) => `:${name}`)
-        .join(", ")}?\n`,
+    const { commands } = await client
+      .call<{ commands: AgentCommand[] }>("commands.list", {
+        ...(args.conversationId === ""
+          ? {}
+          : { conversationId: args.conversationId }),
+        cwd: args.cwd,
+        env: filterEnv(env, config.env),
+      })
+      .catch(() => ({ commands: [] as AgentCommand[] }));
+    const matching = commands.find(
+      (command) => commandAlias(command) === parsed.name,
     );
-    return EXIT.usage;
+    if (matching !== undefined)
+      return { exit: EXIT.ok, text: commandPrompt(matching, parsed.args) };
+    const matches = suggestions(parsed.name, [
+      ...COMMAND_NAMES,
+      ...commands.map(commandAlias),
+    ]);
+    err(
+      `prefaix: :${parsed.name} is not a command.${matches.length === 0 ? " Use :help to see commands, or ': <text>' to send a prompt." : ` Did you mean ${matches.map((name) => `:${name}`).join(", ")}?`}\n`,
+    );
+    return { exit: EXIT.usage };
   }
   if (!parsed.known) {
-    // A real command that belongs to a later milestone. Saying it is not in
-    // this build is honest; pretending it does not exist is not.
     err(
       `prefaix: :${parsed.name} arrives in the ${parsed.milestone} milestone, not this one.\n`,
     );
-    return EXIT.usage;
+    return { exit: EXIT.usage };
   }
+  const choose =
+    options.picker ??
+    ((items: readonly PickItem[], title: string) =>
+      pick({
+        items,
+        title,
+        mode: config.ui.picker,
+        env,
+        out: (text) => err(text),
+        ...(options.tty === undefined ? {} : { tty: options.tty }),
+        ...(options.rows === undefined ? {} : { rows: options.rows }),
+        ...(options.cols === undefined ? {} : { cols: options.cols }),
+      }));
+  if (
+    ["model", "m", "think"].includes(parsed.name) &&
+    args.conversationId === ""
+  )
+    throw new PrefaixError("USAGE", "no active conversation; use :new first");
+  const sessionParams = {
+    conversationId: args.conversationId,
+    env: filterEnv(env, config.env),
+  };
   switch (parsed.name) {
     case "new":
-    case "n":
-      return runNew(parsed.args, client, renderer, args, env, configFile);
+    case "n": {
+      const created = await client.call<ConversationSummary>("conv.new", {
+        shell: shellInfo(args),
+        cwd: args.cwd,
+        env: sessionParams.env,
+      });
+      renderer.notice(`new conversation: ${created.title}`);
+      return {
+        exit: EXIT.ok,
+        conversationId: created.id,
+        ...(parsed.args === "" ? {} : { text: parsed.args }),
+      };
+    }
+    case "conversation":
+    case "c": {
+      if (parsed.args === "-") {
+        const selected = await client.call<ConversationSummary>(
+          "conv.previous",
+          { shellId: args.shellId, fallback: args.previousConversationId },
+        );
+        renderer.notice(`conversation: ${selected.title}`);
+        return { exit: EXIT.ok, conversationId: selected.id };
+      }
+      const { conversations } = await client.call<{
+        conversations: ConversationSummary[];
+      }>("conv.list", { query: parsed.args, limit: 100 });
+      const exact = conversations.find((c) => c.id === parsed.args);
+      if (conversations.length === 0) {
+        renderer.notice("no conversations found");
+        return { exit: EXIT.ok };
+      }
+      let id = exact?.id;
+      if (id === undefined) {
+        const items = await Promise.all(
+          conversations.map(async (c) => {
+            const { text } = await client.call<{ text: string | null }>(
+              "conv.lastText",
+              { conversationId: c.id },
+            );
+            return {
+              id: c.id,
+              label: `${c.title} · ${c.root} · ${c.id}`,
+              preview: `Title: ${plain(c.title)}\nRoot: ${plain(c.root)}\nLast turn: ${plain(text ?? "no assistant text yet")}`,
+            };
+          }),
+        );
+        id = await choose(items, "Conversations");
+      }
+      if (id === undefined) return { exit: EXIT.ok };
+      const selected = await client.call<ConversationSummary>("conv.get", {
+        conversationId: id,
+      });
+      renderer.notice(`conversation: ${selected.title}`);
+      return { exit: EXIT.ok, conversationId: selected.id };
+    }
+    case "model":
+    case "m": {
+      const { models } = await client.call<ModelListResult>(
+        "model.list",
+        sessionParams,
+      );
+      const query = parsed.args.toLowerCase();
+      const matches = models.filter((m) =>
+        `${m.provider}/${m.id} ${m.name ?? ""}`.toLowerCase().includes(query),
+      );
+      const exact = matches.find(
+        (m) => `${m.provider}/${m.id}` === parsed.args || m.id === parsed.args,
+      );
+      const id =
+        exact === undefined
+          ? await choose(
+              matches.map((m) => ({
+                id: `${m.provider}/${m.id}`,
+                label: `${m.provider}/${m.id}${m.name === undefined ? "" : ` · ${m.name}`}`,
+              })),
+              "Models",
+            )
+          : `${exact.provider}/${exact.id}`;
+      if (id === undefined) {
+        if (matches.length === 0) renderer.notice("no matching models");
+        return { exit: EXIT.ok };
+      }
+      const model = models.find((m) => `${m.provider}/${m.id}` === id);
+      if (model === undefined)
+        throw new PrefaixError("USAGE", "the selected model is unavailable");
+      await client.call("model.set", {
+        ...sessionParams,
+        ref: { provider: model.provider, id: model.id },
+      });
+      renderer.notice(`model: ${id}`);
+      return { exit: EXIT.ok };
+    }
+    case "think": {
+      const { levels: thinkingLevels } = await client.call<{
+        levels: string[];
+      }>("thinking.list", sessionParams);
+      const level =
+        parsed.args === ""
+          ? await choose(
+              thinkingLevels.map((id) => ({ id, label: id })),
+              "Thinking level",
+            )
+          : parsed.args;
+      if (level === undefined) return { exit: EXIT.ok };
+      if (!thinkingLevels.includes(level))
+        throw new PrefaixError(
+          "USAGE",
+          `unknown thinking level ${JSON.stringify(level)}; choose ${thinkingLevels.join(", ")}`,
+        );
+      await client.call("thinking.set", { ...sessionParams, level });
+      renderer.notice(`thinking: ${level}`);
+      return { exit: EXIT.ok };
+    }
+    case "copy": {
+      if (args.conversationId === "")
+        throw new PrefaixError("USAGE", "no active conversation; run : first");
+      const { text } = await client.call<{ text: string | null }>(
+        "conv.lastText",
+        sessionParams,
+      );
+      if (text === null || text === "") {
+        renderer.notice("no assistant text to copy yet");
+        return { exit: EXIT.ok };
+      }
+      if (options.clipboard !== undefined) await options.clipboard(text);
+      else
+        await copyText(text, {
+          env,
+          out: options.out ?? ((value) => process.stdout.write(value)),
+          isTty: options.stdoutIsTty ?? process.stdout.isTTY === true,
+        });
+      renderer.notice("copied the last answer");
+      return { exit: EXIT.ok };
+    }
     case "info":
     case "i":
-      return runInfo(client, renderer, args);
-    case "help":
-    case "?":
-      runHelp(renderer);
-      return EXIT.ok;
+      return { exit: await runInfo(client, renderer, args) };
     default:
-      err(`prefaix: :${parsed.name} is not available in this build yet.\n`);
-      return EXIT.usage;
+      return { exit: EXIT.usage };
   }
 }
 
-/**
- * `:new` creates the conversation and, when text follows, prompts it at once.
- * The new id goes back to the shell as a directive, which is what makes the
- * next `:` continue the new conversation rather than the old one.
- */
-async function runNew(
-  text: string,
-  client: DaemonClient,
-  renderer: Renderer,
-  args: RunArgs,
-  env: Readonly<Record<string, string | undefined>>,
-  configFile: string,
-): Promise<ExitCode> {
-  const created = await client.call<{ id: string; title: string }>("conv.new", {
-    shell: {
-      kind: args.shell,
-      version: args.shellVersion,
-      shellId: args.shellId,
-      pid: args.shellPid,
-    },
-    cwd: args.cwd,
-    env: filterEnv(env, { passthrough: "all", allowlist: null, deny: [] }),
-  });
-  if (text === "") {
-    renderer.notice(`new conversation: ${created.title}`);
-    return EXIT.ok;
-  }
-  const result = await runTurn({
-    client,
-    renderer,
-    config: loadConfig({ env, file: configFile }),
-    args: { ...args, conversationId: created.id },
-    env,
-    text,
-    controller: new AbortController(),
-    setTurnId: () => undefined,
-  });
-  return result.exit;
+export function statusLabel(status: StatusSnapshot): string {
+  const model = status.model?.id ?? "default";
+  const context =
+    typeof status.contextPct === "number"
+      ? ` · ${status.contextPct.toFixed(0)}%`
+      : "";
+  return plain(`prefaix · ${model}${context} · ${status.state}`).slice(0, 160);
 }
 
 async function runInfo(
@@ -570,13 +820,16 @@ async function runInfo(
     renderer.line(`root: ${conversation.root}`);
   }
   renderer.line(`backend: ${status.backend}`);
+  if (status.usage !== undefined)
+    renderer.line(
+      `tokens: ${String(status.usage.input)} in · ${String(status.usage.output)} out`,
+    );
   renderer.line(`model: ${modelLabel(status.model)}`);
   if (status.thinking !== undefined) {
     renderer.line(`thinking: ${status.thinking}`);
   }
-  if (status.usage?.costUsd !== undefined) {
-    renderer.line(`cost: $${status.usage.costUsd.toFixed(3)}`);
-  }
+  const cost = conversation?.costUsd ?? status.usage?.costUsd;
+  if (cost !== undefined) renderer.line(`cost: $${cost.toFixed(3)}`);
   if (typeof status.contextPct === "number") {
     renderer.line(`context: ${status.contextPct.toFixed(0)}%`);
   }
@@ -591,13 +844,9 @@ function modelLabel(
 ): string {
   // No model in the snapshot means the conversation is still on whatever the
   // backend was configured with, which is not the same as having no model.
-  return model === undefined ? "pi's default" : `${model.provider}/${model.id}`;
-}
-
-function runHelp(renderer: Renderer): void {
-  for (const line of HELP_LINES) {
-    renderer.line(line);
-  }
+  return model === undefined
+    ? "backend default"
+    : `${model.provider}/${model.id}`;
 }
 
 const HELP_LINES: readonly string[] = [
@@ -605,7 +854,7 @@ const HELP_LINES: readonly string[] = [
   "  : <text>            prompt the active conversation",
   "  :<command> [args]   a prefaix command",
   "  :/<name> [args]     an agent command",
-  "  : <text>            pass through to the shell",
+  "  :                   pass through the shell no-op",
   "  \\: <text>           pass through to the shell",
   "",
   "commands:",

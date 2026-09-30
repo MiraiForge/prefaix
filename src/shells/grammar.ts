@@ -250,6 +250,19 @@ function commandFor(name: string): CommandSpec | undefined {
  * is the shell's own idiom, and only then is this a prefaix line.
  */
 export function parseLine(raw: string, options: GrammarOptions = {}): Parsed {
+  const parsed = parseFirstLine(raw, options);
+  const line = raw.replace(/[\r\n]+$/u, "");
+  const newline = line.search(/\r?\n/u);
+  if (newline === -1 || parsed.kind === "pass") return parsed;
+  const tail = line.slice(newline);
+  // The first line determines routing; continuation lines remain literal
+  // content. Classification must never discard part of the user's prompt.
+  return parsed.kind === "prompt"
+    ? { ...parsed, text: parsed.text + tail }
+    : { ...parsed, args: parsed.args + tail };
+}
+
+function parseFirstLine(raw: string, options: GrammarOptions): Parsed {
   const line = raw.replace(/[\r\n]+$/u, "");
   // Only the first line decides: a `:` in the middle of a multi-line buffer is
   // not what the user is asking prefaix for.
@@ -276,6 +289,7 @@ export function parseLine(raw: string, options: GrammarOptions = {}): Parsed {
   }
 
   const rest = firstLine.slice(1).trimStart();
+  const tightName = !/^:\s/u.test(firstLine);
   if (rest === "") {
     return { kind: "prompt", text: "", newConversation: false };
   }
@@ -295,7 +309,7 @@ export function parseLine(raw: string, options: GrammarOptions = {}): Parsed {
   }
 
   // The name is the first word, whatever it is made of. Anything that is not a
-  // known command but has text after it is a prompt, which is what makes
+  // known command in a spaced sentence is a prompt, which is what makes
   // `: 3 + 4` and `: 日本語で答えて` work.
   const head = /^(\S+)\s*/u.exec(rest);
   // `rest` is not empty, so it starts with a non-space character and the head
@@ -317,7 +331,10 @@ export function parseLine(raw: string, options: GrammarOptions = {}): Parsed {
   // `: copy the file` is a sentence. A command that takes no argument and was
   // given one is not that command; it is a prompt that happens to start with
   // the command's name.
-  if (command !== undefined && (args === "" || command.takesArgs)) {
+  if (
+    command !== undefined &&
+    (tightName || args === "" || command.takesArgs)
+  ) {
     return {
       kind: "command",
       name,
@@ -329,14 +346,12 @@ export function parseLine(raw: string, options: GrammarOptions = {}): Parsed {
     };
   }
 
-  // A bare `: modle` has no prompt it could have meant, and a close match to a
-  // real command is almost certainly what the user was reaching for, so that
-  // one is an error listing the closest matches (DESIGN §3.1). Anything else
-  // with text after it is a prompt.
+  // Tight ASCII names are commands even when misspelled or given arguments.
+  // Otherwise a typo such as `:modle gemini` would unexpectedly prompt a model.
+  // Retain the spaced bare-typo affordance used by earlier prefaix versions.
   if (
-    args === "" &&
     COMMAND_NAME_SHAPE.test(name) &&
-    suggestions(name).length > 0
+    (tightName || (args === "" && suggestions(name).length > 0))
   ) {
     return {
       kind: "command",

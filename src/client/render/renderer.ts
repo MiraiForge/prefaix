@@ -117,6 +117,10 @@ export class Renderer {
     return Object.fromEntries(this.#status);
   }
 
+  close(): void {
+    this.#spinner.stop();
+  }
+
   begin(): void {
     this.#spinner.start("thinking");
   }

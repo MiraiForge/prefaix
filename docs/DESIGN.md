@@ -69,7 +69,7 @@ The plugin inspects only the **first line** of the buffer, and only on Enter:
 
 The shell side only needs a cheap prefix test. **The authoritative parse happens in TypeScript** (`src/shells/grammar.ts`), so the three shells cannot drift: the plugin hands the raw buffer to `prefaix run`, and the client decides what it means.
 
-History: the original line is added to shell history exactly as typed (zsh `print -s`, bash `history -s`, fish `history append`), so ↑ recalls `: fix the test`.
+History: the original line is added to shell history exactly as typed (zsh `print -s`, bash `history -s`, fish's history-file encoding plus native merge), so ↑ recalls `: fix the test`. Supported fish versions have no `history append` operation.
 
 ### 3.2 Commands
 
@@ -204,7 +204,7 @@ Every plugin implements the same six responsibilities, verified by the shared e2
      --recent <exit>:<cmd> … -- "<raw buffer>"   </dev/tty >/dev/tty 2>/dev/tty
    ```
    The raw buffer is passed as a **single argv element**, so no quoting layer can mangle it.
-4. **Apply directives.** It reads `$RUNTIME/shells/<shellId>/directives`, a sequence of `key\0value\0` pairs, and ignores the file unless its `nonce` matches the one it passed. Only these keys are applied: `conversation`, `status`, `buffer`, `cursor`. Unknown keys are ignored.
+4. **Apply directives.** It reads `$RUNTIME/shells/<shellId>/directives`, a sequence of `key\0value\0` pairs, and ignores the file unless its `nonce` matches the one it passed. Only these keys are applied: `conversation`, `status`, `buffer`, `cursor`. Unknown keys are ignored. The cursor is a zero-based Unicode code-point offset; bash 4.4 converts the corresponding prefix to bytes for its older readline interface, while bash 5+, zsh, and fish use character positions. Invalid or missing cursors place it at the end.
 5. **Refresh.** For *run* class, with `buffer` empty, it accepts an **empty line**, so the shell draws a new prompt and re-runs precmd/PROMPT_COMMAND/fish_prompt. For *edit* class, or when typeahead was captured, it sets the buffer and cursor and redraws the prompt without executing.
 6. **Status and right prompt.** It exposes `prefaix_prompt_info` (and the equivalent for fish/bash), which returns `PREFAIX_STATUS`. For detached turns it also reads `$RUNTIME/shells/<shellId>/status` with shell builtins only, so a prompt costs 0 extra processes.
 
@@ -222,15 +222,15 @@ Reading the NUL-delimited file uses builtins only:
 - Passthrough calls `zle accept-line`, not `.accept-line`, so other plugins' wrappers still run.
 - Hit path: `print -s -- $line` → `BUFFER=""` → `zle -I` → run the client → apply directives → either `zle accept-line` on the empty buffer (run class, so precmd re-runs) or set `BUFFER`/`CURSOR` and `zle reset-prompt` (edit class). **[spike S5]** Confirm there is no duplicate blank prompt line and that Forge's `BUFFERLINES` padding trick is unnecessary with an empty accept.
 - Emits OSC 133 B/C/D around the turn when the terminal supports it (Ghostty, WezTerm, iTerm2, kitty, VS Code), because widget-dispatched commands bypass the terminal's own preexec markers. This is Forge's lesson about resize and reflow.
-- Right prompt: prepends `$(prefaix_prompt_info)` to `RPROMPT` only if the user opts in (`ui.rprompt = "auto"` detects an existing `RPROMPT`, p10k, or starship and then prints integration hints instead).
+- Right prompt: a precmd builtin read refreshes cached status; an escaped variable expansion prepends it to `RPROMPT` only if the user opts in. No command substitution runs during prompt draw. `ui.rprompt = "auto"` detects an existing `RPROMPT`, p10k, or starship and prints integration hints instead.
 - Context ring buffer: `preexec` records the command, and a *prepended* `precmd` records `$?` before themes overwrite it. It keeps the last N=10 entries in a zsh array.
 - Optional: registers `ZSH_HIGHLIGHT_PATTERNS+=(':*' …)` when zsh-syntax-highlighting's pattern highlighter is active, so `:cmd` isn't painted red.
 
 #### 4.1.2 fish (≥ 3.6; 4.x primary)
 
 - `bind \r` and `bind \n` to `__prefaix_accept_line` in the default and `insert` modes. It follows vi mode via `fish_bind_mode` and uses fish 4 key names where required.
-- Buffer: `commandline | string collect` preserves multi-line input.
-- History: `builtin history append -- $line`, falling back to `history merge` on older fish, as in Allan's Forge fish plugin. **[spike S6]** Verify recall ordering and dedupe.
+- Buffer: `commandline | string collect --no-trim-newlines`, removing exactly the newline added by `commandline`, preserves multi-line input and trailing newlines.
+- History: supported fish versions have no append operation. Write the literal prompt using fish's history-file escaping and call `builtin history merge`, respecting private mode and the configured history name. Fish 3.6 requires crossing a whole-second boundary before merge sees the entry, so short turns can wait up to about one second after streaming; fish 4.x needs no wait. Immediate recall and byte-exact history are covered by the PTY suite.
 - Hit path: `commandline -r ""` → `echo` → client → directives → `commandline -f repaint` (re-runs `fish_prompt`/`fish_right_prompt`) or `commandline -r $buffer`.
 - Highlighting: a regex abbreviation for `:[A-Za-z][-A-Za-z0-9_]*` in command position with a no-op expansion function, so `:cmd` gets command color instead of error red. This is the trick from the Forge fish PR.
 - Right prompt: wraps an existing `fish_right_prompt` on the first `fish_prompt` event, so starship and tide are wrapped rather than replaced.
@@ -254,7 +254,7 @@ bind    '"\C-j": "\C-x\C-_1\C-x\C-_2"'
 - The bindings are installed in the `emacs`, `vi-insert`, and `vi-command` keymaps.
 - **[spike S4]** Verify on bash 4.4, 5.1, and 5.2 (macro plus dynamic re-bind timing, multi-line, `bind -x` tty handoff to a raw-mode child, and interaction with bash-preexec, atuin, and starship).
 - Context: a `trap DEBUG` wrapper when bash-preexec is absent; bash-preexec's `preexec_functions` when present.
-- Right prompt: none in bash. prefaix offers `__prefaix_ps1` for PS1 and a starship custom-module snippet.
+- Right prompt: none in bash. The precmd hook refreshes `PREFAIX_STATUS` for direct variable expansion in PS1 without a subshell. `__prefaix_ps1` remains available as a builtin helper. The optional Starship custom-module snippet is outside the native zero-process prompt budget.
 
 #### 4.1.4 bash 3.2 (macOS `/bin/bash`) degraded mode
 
@@ -399,11 +399,12 @@ interface TurnStartParams {
 }
 ```
 
-`seq` is per turn and monotonic. The daemon keeps a bounded event ring (default 4 MB) for the active turn and the last finished turn of each conversation, which is what makes `:attach` replay possible.
+`seq` is per turn and monotonic. The daemon keeps a bounded event ring (default 4 MB) for each active turn and the last finished turns of at most `pool.max_children` conversations. Older replay rings expire; their native transcripts and conversation metadata remain on disk.
 
 #### 4.3.3 Turn manager
 
 - **One running turn per conversation.** A `turn.start` for a busy conversation (for example, another shell picked it via `:c`) returns `CONVERSATION_BUSY` with a `:attach` hint. In M4 it queues as a follow-up instead, if the backend supports it.
+- **Durable finalization.** Ownership covers startup and outcome persistence, including after a client disconnects. The native resume handle is saved before prompting. The final metadata write and status publication finish before ownership is released and `turn.end` is sent. Shutdown aborts streams, closes children, and drains outcome and log writes before releasing the daemon lock. The CLI's `daemon stop` acknowledges the shutdown request; cleanup must wait for shutdown completion.
 - **Abort:** `clear_queue` then `abort` on the adapter. It always resolves to a `settled {stopReason:"aborted"}`.
 - **Disconnect:**
   - If the client socket closes without a detach, apply `onDisconnect` (default **abort**, the least surprise, matching closing a pi TUI).
@@ -415,14 +416,14 @@ interface TurnStartParams {
 |---|---|
 | Binding | One child per active conversation, bound to its **root** and **env fingerprint**. |
 | Env change | If the next turn's env fingerprint differs (a new `PATH`, `VIRTUAL_ENV`, exported keys…), respawn the child on the same session (`--session <file>`). This costs about 0.8 s, and only when the env actually changed. |
-| Capacity | `pool.max_children` (default 6). The least-recently-used idle child is closed when capacity is reached. The session lives on disk, so reopening only costs a respawn. |
-| Idle | A child idle for 15 min is closed. |
-| Spare | After each turn, keep **one spare** child pre-warmed for the most recent (root, envHash), so the next `:new` or first prompt in a new shell avoids cold start. A spare is adopted by reading `sessionFile`/`sessionId` via `get_state`. **[spike S2]** Measure RSS per child to set defaults. |
+| Capacity | `pool.max_children` (default 6) includes the optional spare and children opening or closing. Lifecycle mutations are serialized. Capacity pressure closes the least-recently-used idle child; if every child is busy, acquisition returns `CONVERSATION_BUSY`. |
+| Idle | A child idle for 15 min is closed by the daemon's existing 30-second sweep, even with clients connected. Startup, streaming, and finalization are protected. The spare expires too. |
+| Spare | After a turn, pre-warm **one spare** for the most recent (root, envHash) only when a capacity slot is free. Adopt it for a fresh conversation after applying title/model/thinking. Existing native transcripts and persona-bearing requests open their own child; persona restrictions apply at spawn. Every spare remains owned until adopted or closed. **[spike S2]** Measure real child RSS to validate defaults. |
 | Crash | A child exiting mid-turn produces `settled {stopReason:"error"}` plus a notice. The next turn respawns with `--session <file>`. Three crashes within 60 s mark the conversation `degraded` and surface `prefaix doctor`. |
 
 #### 4.3.5 Conversation store
 
-prefaix persists **its own index**. Each adapter keeps its native transcript (pi session JSONL). Files live under `~/.local/state/prefaix/conversations/<id>.json` and are written atomically (temp file, fsync, rename).
+prefaix persists **its own index**. Each adapter keeps its native transcript (pi session JSONL). Files live under `~/.local/state/prefaix/conversations/<id>.json`. Within the owning daemon, each record's reads and mutations are serialized across store instances. Writes exclusively create a private UUID temporary file, fsync its contents, rename it, and fsync the parent directory. Failed writes clean up their temporary file and release the record queue. This coordination is process-local and relies on the single-daemon lock; it is not a multi-process database transaction or a transaction with pi's transcript.
 
 ```ts
 interface ConversationRecord {
@@ -799,10 +800,23 @@ The baseline is measured on Allan's M-series Mac, with pi 0.87.1 and Node 26.
 |---|---|---|
 | Normal command (no `:`) | +0 processes, < 1 ms | Prefix test in shell builtins only. |
 | Prompt draw | +0 processes | Status from shell vars or a builtin file read. |
-| `prefaix run` start → daemon hello | p50 < 60 ms, p95 < 120 ms | Single bundled file, lazy imports, no config parse on the hot path unless needed. **[spike S8]** If missed, compile the client (Node SEA or `bun build --compile`). |
+| `prefaix run` start → daemon hello | p50 < 60 ms, p95 < 120 ms | Bundled local ESM chunks, lazy imports, and no native process/crypto/readline loading until needed. If missed, evaluate a compiled client (Node SEA or `bun build --compile`). |
 | Enter → first token (warm child) | prefaix overhead < 100 ms | Warm pool plus spare. |
 | Enter → first token (cold child) | ≈ pi cold start (~0.8 s with extensions) + provider latency | Spare pre-warm hides this for `:new`. |
-| Daemon idle RSS | < 60 MB (excluding children) | |
+| Daemon idle RSS | < 60 MB (excluding children); Node 26 allowlisted | RSS remains measured and the exception is explicit in the report. |
+
+The repeatable M3 memory gate samples a fresh daemon, one that has served 51
+ordinary fake turns, and one that has served three 2,000-delta bursts. Both
+post-use samples follow five seconds without clients. All three must pass the
+60,000,000-byte idle budget (57.22MiB), except Node major 26: Allan explicitly
+allowlisted its idle-RSS overrun. Reports retain all measurements and mark an
+overrun as `idleMemoryBudget.status = "allowlisted"`, rather than a measured
+pass. Timing, throughput, valid RSS measurements, and other Node majors retain
+their gates. The burst also validates throughput and exact rendered output.
+The daemon uses interpreter mode and a small young generation to avoid
+retaining JIT code; clients and pi children keep their normal runtimes.
+See [VALIDATION.md](VALIDATION.md) for the exact method, measured results,
+and the approved Node 26 idle-memory exception.
 
 ---
 
@@ -956,12 +970,12 @@ work:
   *below* the row the shell was left on.
 - **The terminal answers the shell's capability queries.** A shell that gets no
   reply can give up; answering is part of emulating a terminal.
-- **A shell that cannot be driven is detected and reported, not failed.**
-  `probeShell` runs at suite start and each unavailable shell is skipped with its
-  reason printed in the run. fish 4.9.3 queries the terminal at startup and exits
-  without a reply in exactly the shape it wants, on this machine and under
-  Python's `pty` as well as node-pty, so the fish gates cannot run here yet. zsh
-  and bash are fully covered.
+- **A shell that cannot be driven is detected and reported.** `probeShell`
+  runs at suite start; local optional shells can skip with a reason, while
+  `PREFAIX_E2E_REQUIRED=1` makes missing shells fail the CI gate. The earlier
+  fish startup failure was a harness defect: xterm's generated capability
+  replies must reach the PTY, including `ESC[0c`. The harness now forwards
+  them, and fish 3.6.4, 4.0.2, and the installed 4.x can be driven.
 - **A tab arrives on the screen as spaces to the next tab stop**, so assertions
   are made against what a user sees, not the bytes the shell wrote.
 - `node-pty`'s prebuilt `spawn-helper` ships without its executable bit and its

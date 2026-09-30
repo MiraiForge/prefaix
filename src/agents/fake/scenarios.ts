@@ -1,3 +1,6 @@
+import { SCENARIO_NAMES, type ScenarioName } from "./scenario-names.js";
+export { SCENARIO_NAMES, type ScenarioName } from "./scenario-names.js";
+
 // Scripted turns for the fake backend. A scenario is the literal event
 // sequence one turn emits, so a test asserts on the same data the fake runs.
 //
@@ -227,7 +230,22 @@ export const MARKDOWN: Scenario = [
   { type: "settled", stopReason: "stop" },
 ];
 
+/** Bounded, timer-free transport/renderer throughput fixture; never a model call. */
+export const BURST_TEXT_EVENTS = 2000;
+export const BURST: Scenario = [
+  { type: "turn_start" },
+  ...Array.from({ length: BURST_TEXT_EVENTS }, (_, index): AgentEvent => ({
+    type: "text_delta",
+    block: 0,
+    text: `burst:${String(index)}\n`,
+  })),
+  { type: "text_end", block: 0 },
+  { type: "usage", input: 1, output: BURST_TEXT_EVENTS, costUsd: 0 },
+  { type: "settled", stopReason: "stop" },
+];
+
 export const SCENARIOS = {
+  burst: BURST,
   hello: HELLO,
   tools: TOOLS,
   long: LONG,
@@ -236,11 +254,7 @@ export const SCENARIOS = {
   retry: RETRY,
   buffer: BUFFER,
   markdown: MARKDOWN,
-} as const;
-
-export type ScenarioName = keyof typeof SCENARIOS;
-
-export const SCENARIO_NAMES = Object.keys(SCENARIOS).sort() as ScenarioName[];
+} as const satisfies Record<ScenarioName, Scenario>;
 
 export const DEFAULT_SCENARIO: ScenarioName = "hello";
 

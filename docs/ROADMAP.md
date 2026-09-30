@@ -147,6 +147,16 @@ that basis.
 - Doctor is clean on Allan's daily-driver machine after removing the Forge plugin line from `~/.zshrc`.
 - Allan has used it daily for 3 days on at least two shells, with no tty corruption and no lost typeahead.
 
+M3 feature implementation and its automated gates are present; acceptance is
+still in progress. Allan approved a Node 26 idle-memory exception; Linux and
+human acceptance evidence remain required.
+The [validation guide](VALIDATION.md) describes the native version
+matrix, stability runs, and performance method, and the
+[release gate](RELEASE.md) separates local evidence from Linux CI, required-check
+configuration, the README walkthrough, the daily-use trial, and publishing.
+Beads `prefaix-mbd` remains the current acceptance record. The package is still
+private and no release is implied by this implementation.
+
 ---
 
 ## M4 — Parity and beyond Forge (10–12 d)

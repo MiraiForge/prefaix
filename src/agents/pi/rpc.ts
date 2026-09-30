@@ -10,7 +10,6 @@
 // nothing at all, and pi intermittently blocks at startup with no output, so
 // ready is a wait with a deadline rather than a certainty.
 
-import { spawn } from "node:child_process";
 import { PrefaixError } from "../../core/errors.js";
 import { createQueue, type AsyncQueue } from "../../core/async-queue.js";
 import {
@@ -58,6 +57,7 @@ function processSpawn(
   args: readonly string[],
   options: { readonly cwd: string; readonly env: Record<string, string> },
 ): PiChild {
+  const { spawn } = process.getBuiltinModule("child_process");
   const child = spawn(bin, [...args], {
     cwd: options.cwd,
     env: options.env,

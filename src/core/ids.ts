@@ -1,5 +1,3 @@
-import { randomFillSync } from "node:crypto";
-
 // Identifiers from DESIGN §5: conversation `c_<ULID>`, turn `t_<ULID>`,
 // request `r<n>`, and shell `<pid>-<epoch>-<rand>`. Conversation and shell ids
 // become file names, so anything read from the wire, argv, or disk must pass
@@ -51,7 +49,12 @@ export function createUlidFactory(
   options: UlidFactoryOptions = {},
 ): () => string {
   const now = options.now ?? Date.now;
-  const fill = options.random ?? ((bytes: Uint8Array) => randomFillSync(bytes));
+  const fill =
+    options.random ??
+    ((bytes: Uint8Array) => {
+      const { randomFillSync } = process.getBuiltinModule("crypto");
+      randomFillSync(bytes);
+    });
   let lastTime = -1;
   let lastRandom = 0n;
   return () => {

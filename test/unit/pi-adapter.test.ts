@@ -307,6 +307,21 @@ describe("a turn through PiAdapter", () => {
 });
 
 describe("session commands through PiAdapter", () => {
+  it("asks pi for the active model's supported thinking levels", async () => {
+    const session = await openSession("stream.jsonl");
+    expect(await session.listThinkingLevels()).toEqual([
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    await session.setThinking("high");
+    await session.close();
+  });
+
   it("lists models, sets one, and reports it in state", async () => {
     const session = await openSession("stream.jsonl");
     const models = await session.listModels();
@@ -402,12 +417,14 @@ describe("session commands through PiAdapter", () => {
     await session.close();
   });
 
-  it("records a persona and reports busy while a turn runs", async () => {
+  it("refuses a persona switch without a bridge and reports busy while a turn runs", async () => {
     const session = await openSession("stream.jsonl");
     expect(session.busy).toBe(false);
     expect(session.persona).toBeUndefined();
-    await session.setPersona({ name: "ask", tools: ["read"] });
-    expect(session.persona).toEqual({ name: "ask", tools: ["read"] });
+    await expect(
+      session.setPersona({ name: "ask", tools: ["read"] }),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED" });
+    expect(session.persona).toBeUndefined();
     const running = run(session);
     expect(session.busy).toBe(true);
     await running;
@@ -826,6 +843,8 @@ describe("state and usage from a live child", () => {
     });
     const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
     expect(session.bridgeLive).toBe(true);
+    await session.setPersona({ name: "ask", tools: ["read"] });
+    expect(session.persona).toEqual({ name: "ask", tools: ["read"] });
     await run(session, input("exactly what I typed"));
     const prompt = trace(tracePath).find(
       (command) => command["type"] === "prompt",
@@ -968,6 +987,7 @@ describe("adapter option pass-through", () => {
     const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
     // A model with no name, no window, and no reasoning flag is still usable.
     expect(await session.listModels()).toEqual([{ provider: "p", id: "i" }]);
+    expect(await session.listThinkingLevels()).toEqual([]);
     await session.close();
   });
 
@@ -1073,7 +1093,10 @@ describe("adapter resilience", () => {
       },
     });
     const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
+    expect(session.isAlive).toBe(true);
     const events = await run(session);
+    expect(session.isAlive).toBe(false);
+    await session.close();
     // Whatever happened, the turn ends with exactly one settled.
     expect(events.filter((event) => event.type === "settled")).toHaveLength(1);
     expect(events.at(-1)?.type).toBe("settled");
@@ -1532,5 +1555,44 @@ describe("adapter edges the review found", () => {
     expect(
       createPiAdapter({ turnsDir: "/tmp/turns" }).capabilities.contextSections,
     ).toBe(false);
+  });
+});
+
+describe("local session lifecycle health", () => {
+  it("exposes liveness without a request and shares concurrent close completion", async () => {
+    const path = tempTrace();
+    const session = await openSession("stream.jsonl", { trace: path });
+    const before = trace(path).length;
+    expect(session.isAlive).toBe(true);
+    expect(trace(path)).toHaveLength(before);
+    const first = session.close();
+    const second = session.close();
+    expect(second).toBe(first);
+    await Promise.all([first, second]);
+    expect(session.isAlive).toBe(false);
+    await session.close();
+  });
+});
+
+describe("runtime persona switching", () => {
+  it("rejects a switch when a configured bridge failed to load", async () => {
+    const adapter = createPiAdapter({
+      bridgePath: "/pfx/pi-bridge.js",
+      turnsDir: mkdtempSync(join(tmpdir(), "pfx-persona-")),
+      bridgeReady: () => false,
+      rpc: {
+        bin: process.execPath,
+        args: [CHILD, join(FIXTURES, "stream.jsonl")],
+        cwd: ROOT,
+        env: {},
+      },
+    });
+    expect(adapter.capabilities.personasWithoutRespawn).toBe(true);
+    const session = (await adapter.open({ root: ROOT, env: {} })) as PiSession;
+    await expect(
+      session.setPersona({ name: "ask", tools: ["read"] }),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED" });
+    expect(session.persona).toBeUndefined();
+    await session.close();
   });
 });

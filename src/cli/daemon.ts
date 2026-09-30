@@ -12,7 +12,6 @@ import {
   messageOf,
 } from "../core/errors.js";
 import { Daemon } from "../daemon/daemon.js";
-import { DaemonClient } from "../client/connection.js";
 import { loadConfig } from "../core/config/index.js";
 import { resolvePaths } from "../core/paths.js";
 import type { PrefaixPaths } from "../core/paths.js";
@@ -58,6 +57,7 @@ async function status(io: CliIo): Promise<ExitCode> {
   }
   // Autospawn is off for the same reason as `stop`: a status report about a
   // daemon that is not there should say so, not create one.
+  const { DaemonClient } = await import("../client/connection.js");
   const client = new DaemonClient({
     paths: io.paths,
     version: io.version ?? "0.0.0",
@@ -140,6 +140,7 @@ async function start(
 
 async function stop(io: CliIo): Promise<ExitCode> {
   // Autospawn is off: `stop` must never start a daemon in order to stop it.
+  const { DaemonClient } = await import("../client/connection.js");
   const client = new DaemonClient({
     paths: io.paths,
     version: io.version ?? "0.0.0",

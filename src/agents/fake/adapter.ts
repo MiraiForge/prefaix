@@ -33,23 +33,8 @@ import {
   type Scenario,
 } from "./scenarios.js";
 
-export const FAKE_ID = "fake";
-
-// pi-specific features stay off, so the fake never pretends to be a pi host.
-const FAKE_CAPABILITIES: Capabilities = {
-  steer: false, // M4
-  followUp: false, // M4
-  abort: true,
-  models: true,
-  thinkingLevels: true,
-  compact: true,
-  slashCommands: true,
-  skills: true,
-  uiDialogs: true,
-  contextSections: true,
-  personasWithoutRespawn: true,
-  handoffTui: false, // :tui hands off to pi
-};
+import { FAKE_ID, FAKE_CAPABILITIES } from "./capabilities.js";
+export { FAKE_ID } from "./capabilities.js";
 
 const CONTEXT_WINDOW = 200_000;
 
@@ -171,6 +156,10 @@ export class FakeSession implements AgentSession {
     this.#tick = options.tick;
     this.native = { sessionId: transcript.sessionId };
     this.lastRoot = lastRoot;
+  }
+
+  get isAlive(): boolean {
+    return !this.#closed;
   }
 
   get transcript(): FakeTranscript {
@@ -408,6 +397,10 @@ export class FakeSession implements AgentSession {
     this.#transcript.model = { provider: ref.provider, id: ref.id };
   }
 
+  async listThinkingLevels(): Promise<string[]> {
+    return [...FAKE_THINKING_LEVELS];
+  }
+
   async setThinking(level: string): Promise<void> {
     const known = FAKE_THINKING_LEVELS as readonly string[];
     if (!known.includes(level)) {
@@ -515,8 +508,13 @@ export class FakeAgent implements AgentBackend {
     const env = options.env ?? process.env;
     this.#scenarioName =
       options.scenario ?? env["PREFAIX_FAKE_SCENARIO"] ?? DEFAULT_SCENARIO;
-    const tickMs = options.tickMs ?? DEFAULT_TICK_MS;
-    const sleep = options.sleep ?? defaultSleep;
+    const burst =
+      this.#scenarioName === "burst" &&
+      options.steps === undefined &&
+      options.tickMs === undefined;
+    const tickMs = options.tickMs ?? (burst ? 0 : DEFAULT_TICK_MS);
+    const sleep =
+      options.sleep ?? (burst ? () => Promise.resolve() : defaultSleep);
     this.#tick = () => sleep(tickMs);
     this.#steps = options.steps;
     this.capabilities = { ...FAKE_CAPABILITIES, ...options.capabilities };

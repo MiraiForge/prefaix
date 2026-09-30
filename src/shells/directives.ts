@@ -27,7 +27,7 @@ export interface Directives {
   status?: string;
   /** Text to put in the prompt buffer without running it. */
   buffer?: string;
-  /** Cursor offset within `buffer`. */
+  /** Zero-based Unicode code-point offset within `buffer`; invalid or absent means end. */
   cursor?: number;
 }
 

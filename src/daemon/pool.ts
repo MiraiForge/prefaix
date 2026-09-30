@@ -1,9 +1,6 @@
-// The agent pool (DESIGN §4.3.4). One warm child per active conversation,
-// bound to its root and env fingerprint, closed when idle, and respawned on the
-// same native session when the shell's environment actually changes.
-//
-// Everything here is backend-independent: the pool knows AgentPort and nothing
-// about pi. The adapter turns `native` back into a spawn plan.
+// Backend-independent ownership of warm children and the optional spare.
+// Lifecycle mutations are serialized so opening and closing children reserve
+// their slots until ownership can be transferred safely.
 
 import { PrefaixError, unsupported, messageOf } from "../core/errors.js";
 import { envFingerprint } from "../context/env.js";
@@ -11,6 +8,7 @@ import type {
   AgentBackend,
   AgentSession,
   ModelInfo,
+  NativeRef,
   OpenOptions,
   PersonaSpec,
 } from "../core/agent-port.js";
@@ -21,6 +19,8 @@ export interface PoolOptions {
   readonly config: PrefaixConfig;
   readonly log?: (message: string, fields?: Record<string, unknown>) => void;
   readonly now?: () => number;
+  /** Includes turn startup and finalization, not just agent streaming. */
+  readonly isBusy?: (conversationId: string) => boolean;
   /** Spare pre-warm; off in tests that count children. */
   readonly spare?: boolean;
 }
@@ -33,20 +33,28 @@ export interface AcquireRequest {
   readonly model?: { provider: string; id: string };
   readonly thinking?: string;
   readonly persona?: PersonaSpec;
-  readonly native?: { sessionFile?: string; sessionId?: string };
+  readonly native?: NativeRef;
 }
 
 interface Binding {
   readonly conversationId: string;
-  root: string;
-  envHash: string;
-  session: AgentSession;
+  readonly root: string;
+  readonly envHash: string;
+  readonly session: AgentSession;
   lastUsed: number;
-  turns: number;
-  persona: string | undefined;
-  /** Recent crash timestamps, for the three-in-60s degraded rule. */
+  persona: PersonaSpec | undefined;
   crashes: number[];
   degraded: boolean;
+  crashObserved: boolean;
+  closed: boolean;
+}
+
+interface Spare {
+  readonly root: string;
+  readonly envHash: string;
+  readonly lastUsed: number;
+  session: AgentSession | undefined;
+  closed: boolean;
 }
 
 export interface PoolStats {
@@ -64,27 +72,26 @@ export class AgentPool {
   readonly #log:
     ((message: string, fields?: Record<string, unknown>) => void) | undefined;
   readonly #now: () => number;
+  readonly #isBusy: (conversationId: string) => boolean;
   readonly #bindings = new Map<string, Binding>();
-  #spare:
-    | {
-        root: string;
-        env: Record<string, string>;
-        envHash: string;
-        promise: Promise<AgentSession>;
-      }
-    | undefined;
+  #spare: Spare | undefined;
+  #opening = 0;
+  #pending: Promise<unknown> | undefined;
+  #closing = false;
+  #closePromise: Promise<void> | undefined;
 
   constructor(options: PoolOptions) {
     this.#backend = options.backend;
-    this.#config = options.config;
+    this.#config =
+      options.spare === undefined
+        ? options.config
+        : {
+            ...options.config,
+            pool: { ...options.config.pool, spare: options.spare },
+          };
     this.#log = options.log;
     this.#now = options.now ?? Date.now;
-    if (options.spare !== undefined) {
-      this.#config = {
-        ...options.config,
-        pool: { ...options.config.pool, spare: options.spare },
-      };
-    }
+    this.#isBusy = options.isBusy ?? (() => false);
   }
 
   get backend(): AgentBackend {
@@ -93,105 +100,99 @@ export class AgentPool {
 
   stats(): PoolStats {
     return {
-      children: this.#bindings.size,
+      children:
+        [...this.#bindings.values()].filter((binding) => !binding.closed)
+          .length + this.#opening,
       spare: this.#spare === undefined ? 0 : 1,
-      degraded: [...this.#bindings.entries()]
-        .filter(([, binding]) => binding.degraded)
-        .map(([id]) => id),
+      degraded: [...this.#bindings.values()]
+        .filter((binding) => binding.degraded)
+        .map((binding) => binding.conversationId),
     };
   }
 
-  /**
-   * The session for a conversation, spawning or respawning as the binding
-   * requires. A respawn keeps the native session, so the transcript survives
-   * an env change; a fresh conversation gets a new native id.
-   */
-  async acquire(request: AcquireRequest): Promise<AgentSession> {
-    const envHash = envFingerprint(request.env);
-    const existing = this.#bindings.get(request.conversationId);
+  #mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const work =
+      this.#pending === undefined
+        ? operation()
+        : this.#pending.catch(() => undefined).then(operation);
+    const result = work.finally(() => {
+      if (this.#pending === result) {
+        this.#pending = undefined;
+      }
+    });
+    this.#pending = result;
+    return result;
+  }
 
-    if (existing !== undefined) {
-      const reopens = this.#needsRespawn(existing, request, envHash);
-      if (!reopens) {
-        existing.lastUsed = this.#now();
+  #assertOpen(): void {
+    if (this.#closing) {
+      throw new PrefaixError("AGENT_UNAVAILABLE", "agent pool is closing");
+    }
+  }
+
+  /** A replacement always resumes the existing native transcript. */
+  acquire(request: AcquireRequest): Promise<AgentSession> {
+    return this.#mutate(async () => {
+      this.#assertOpen();
+      const envHash = envFingerprint(request.env);
+      const existing = this.#bindings.get(request.conversationId);
+      if (existing !== undefined) {
+        this.#pruneCrashes(existing);
         if (
-          request.persona !== undefined &&
-          request.persona.name !== existing.persona
+          !existing.closed &&
+          existing.session.isAlive === false &&
+          !existing.crashObserved
         ) {
-          existing.persona = request.persona.name;
-          // Without the bridge a persona is applied by the spawn arguments, so
-          // switching one is a respawn rather than an in-place change.
-          if (this.#backend.capabilities.personasWithoutRespawn) {
-            await existing.session.setPersona?.(request.persona);
-          } else {
-            await this.#replace(existing, request, envHash);
-            return existing.session;
-          }
+          this.noteCrash(request.conversationId);
         }
+        const respawn =
+          existing.closed ||
+          existing.crashObserved ||
+          existing.session.isAlive === false ||
+          existing.envHash !== envHash ||
+          existing.root !== request.root;
+        const personaChanged =
+          request.persona !== undefined &&
+          JSON.stringify(request.persona) !== JSON.stringify(existing.persona);
+        if (
+          respawn ||
+          (personaChanged && !this.#backend.capabilities.personasWithoutRespawn)
+        ) {
+          const native = { ...existing.session.native };
+          await this.#closeBinding(existing);
+          // Other bindings and the spare may now occupy a formerly dead slot.
+          await this.#makeRoom();
+          return (await this.#open(request, envHash, native, existing)).session;
+        }
+        if (personaChanged) {
+          if (existing.session.setPersona === undefined) {
+            throw unsupported(this.#backend.id, "personasWithoutRespawn");
+          }
+          await existing.session.setPersona(request.persona!);
+          existing.persona = request.persona;
+        }
+        existing.lastUsed = this.#now();
+        this.#assertOpen();
         return existing.session;
       }
-      await this.#replace(existing, request, envHash);
-      return existing.session;
-    }
 
-    await this.#makeRoom();
-    const binding = await this.#open(request, envHash);
-    this.#bindings.set(request.conversationId, binding);
-    // The spare exists to answer the next prompt, so this turn's own child is
-    // the one that has just been used.
-    this.#spare = undefined;
-    return binding.session;
-  }
-
-  #needsRespawn(
-    binding: Binding,
-    request: AcquireRequest,
-    envHash: string,
-  ): boolean {
-    if (binding.degraded) {
-      return true;
-    }
-    if (binding.envHash !== envHash) {
-      this.#log?.("env changed, respawning the agent child", {
-        conversation: binding.conversationId,
-      });
-      return true;
-    }
-    if (binding.root !== request.root) {
-      // The cwd policy is resolved by the turn manager, which passes the root
-      // it actually wants; a different root is a different spawn.
-      this.#log?.("root changed, respawning the agent child", {
-        conversation: binding.conversationId,
-        from: binding.root,
-        to: request.root,
-      });
-      return true;
-    }
-    return false;
-  }
-
-  async #replace(
-    binding: Binding,
-    request: AcquireRequest,
-    envHash: string,
-  ): Promise<void> {
-    const previous = binding.session;
-    const opened = await this.#open(request, envHash, previous.native);
-    binding.session = opened.session;
-    binding.root = request.root;
-    binding.envHash = envHash;
-    binding.lastUsed = this.#now();
-    binding.crashes = [];
-    binding.degraded = false;
-    binding.turns = 0;
-    await previous.close().catch(() => undefined);
+      const adopted = await this.#adoptSpare(request, envHash);
+      if (adopted !== undefined) {
+        return adopted;
+      }
+      await this.#closeSpare();
+      await this.#makeRoom();
+      return (await this.#open(request, envHash)).session;
+    });
   }
 
   async #open(
     request: AcquireRequest,
     envHash: string,
-    native?: { sessionFile?: string; sessionId?: string },
+    native: NativeRef | undefined = request.native,
+    previous?: Binding,
   ): Promise<Binding> {
+    this.#assertOpen();
     const openOptions: OpenOptions = {
       root: request.root,
       env: request.env,
@@ -203,72 +204,128 @@ export class AgentPool {
       ...(request.thinking === undefined ? {} : { thinking: request.thinking }),
       ...(request.persona === undefined ? {} : { persona: request.persona }),
     };
-    const session = await this.#backend.open(openOptions);
-    return {
-      conversationId: request.conversationId,
-      root: request.root,
-      envHash,
-      session,
-      lastUsed: this.#now(),
-      turns: 0,
-      persona: request.persona?.name,
-      crashes: [],
-      degraded: false,
-    };
+    this.#opening += 1;
+    try {
+      const session = await this.#backend.open(openOptions);
+      const binding: Binding = {
+        conversationId: request.conversationId,
+        root: request.root,
+        envHash,
+        session,
+        lastUsed: this.#now(),
+        persona: request.persona,
+        crashes: previous?.crashes ?? [],
+        degraded: previous?.degraded ?? false,
+        crashObserved: false,
+        closed: false,
+      };
+      this.#bindings.set(request.conversationId, binding);
+      // Shutdown may have started while the backend was opening. The new
+      // binding stays owned so queued shutdown closes it before completing.
+      this.#assertOpen();
+      return binding;
+    } finally {
+      this.#opening -= 1;
+    }
   }
 
-  /**
-   * Closes the least recently used child when the pool is at capacity. The
-   * session lives on disk, so closing costs a respawn and nothing else.
-   *
-   * There is one binding per conversation, so a conversation asking for room
-   * always has at most one child of its own to skip, and the pool can always
-   * find a victim. It may be a conversation with a turn in flight, whose next
-   * turn then pays the respawn; that is the price of a fixed ceiling, and it is
-   * better than refusing the turn.
-   */
   async #makeRoom(): Promise<void> {
     const max = Math.max(1, this.#config.pool.maxChildren);
-    if (this.#bindings.size < max) {
+    if (this.stats().children + this.stats().spare < max) {
       return;
     }
-    const victim = [...this.#bindings.values()].sort(
-      (a, b) => a.lastUsed - b.lastUsed,
-    )[0];
+    await this.#closeSpare();
+    if (this.stats().children < max) {
+      return;
+    }
+    const victim = [...this.#bindings.values()]
+      .filter(
+        (binding) => !binding.closed && !this.#isBusy(binding.conversationId),
+      )
+      .sort((a, b) => a.lastUsed - b.lastUsed)[0];
     if (victim === undefined) {
-      return;
+      throw new PrefaixError(
+        "CONVERSATION_BUSY",
+        "all agent child slots are occupied by active conversations",
+        { hint: "Wait for a running turn to finish, then try again." },
+      );
     }
-    this.#log?.("closing the least recently used agent child", {
+    this.#log?.("closing the least recently used idle agent child", {
       conversation: victim.conversationId,
     });
+    await this.#closeBinding(victim);
     this.#bindings.delete(victim.conversationId);
-    await victim.session.close().catch(() => undefined);
   }
 
-  /** Records a turn so the idle sweep has a reason to keep the child. */
+  /** Failed closure retains ownership unless the backend confirms exit. */
+  async #closeSession(owner: {
+    session: AgentSession;
+    closed: boolean;
+  }): Promise<void> {
+    if (owner.closed) {
+      return;
+    }
+    try {
+      await owner.session.close();
+    } catch (cause) {
+      if (owner.session.isAlive !== false) {
+        throw new PrefaixError(
+          "AGENT_UNAVAILABLE",
+          "agent child could not be closed",
+          { cause },
+        );
+      }
+    }
+    if (owner.session.isAlive === true) {
+      throw new PrefaixError(
+        "AGENT_UNAVAILABLE",
+        "agent child is still alive after closing",
+      );
+    }
+    owner.closed = true;
+  }
+
+  #closeBinding(binding: Binding): Promise<void> {
+    return this.#closeSession(binding);
+  }
+
+  async #closeSpare(): Promise<void> {
+    const spare = this.#spare;
+    if (spare === undefined) {
+      return;
+    }
+    if (spare.session !== undefined) {
+      const owner = { session: spare.session, closed: spare.closed };
+      await this.#closeSession(owner);
+      spare.closed = owner.closed;
+    }
+    this.#spare = undefined;
+  }
+
   touch(conversationId: string): void {
     const binding = this.#bindings.get(conversationId);
     if (binding !== undefined) {
       binding.lastUsed = this.#now();
-      binding.turns += 1;
     }
   }
 
-  /**
-   * A child that died mid-turn. Three crashes inside a minute mark the
-   * conversation degraded, which the next spawn answers with a fresh child and
-   * a `prefaix doctor` hint rather than an endless respawn loop.
-   */
+  #pruneCrashes(binding: Binding): void {
+    const now = this.#now();
+    binding.crashes = binding.crashes.filter(
+      (at) => now - at < CRASH_WINDOW_MS,
+    );
+    binding.degraded = binding.crashes.length >= CRASH_LIMIT;
+  }
+
+  /** Record once when a transport failure is observed; never retry its prompt. */
   noteCrash(conversationId: string): { degraded: boolean; recent: number } {
     const binding = this.#bindings.get(conversationId);
     if (binding === undefined) {
       return { degraded: false, recent: 0 };
     }
-    const now = this.#now();
-    binding.crashes = [
-      ...binding.crashes.filter((at) => now - at < CRASH_WINDOW_MS),
-      now,
-    ];
+    this.#pruneCrashes(binding);
+    binding.crashes.push(this.#now());
+    binding.crashObserved = true;
     binding.degraded = binding.crashes.length >= CRASH_LIMIT;
     if (binding.degraded) {
       this.#log?.("conversation marked degraded after repeated crashes", {
@@ -279,122 +336,193 @@ export class AgentPool {
     return { degraded: binding.degraded, recent: binding.crashes.length };
   }
 
-  /** Closes children idle for longer than `pool.idle_minutes`. */
-  async sweepIdle(): Promise<string[]> {
-    const cutoff =
-      this.#now() - Math.max(0, this.#config.pool.idleMinutes) * 60_000;
-    const closed: string[] = [];
-    for (const [id, binding] of [...this.#bindings]) {
-      if (binding.lastUsed <= cutoff) {
-        this.#bindings.delete(id);
-        closed.push(id);
-        await binding.session.close().catch(() => undefined);
+  /** Busy includes startup/finalization, so neither can be swept as idle. */
+  sweepIdle(): Promise<string[]> {
+    return this.#mutate(async () => {
+      const idleMs = Math.max(0, this.#config.pool.idleMinutes) * 60_000;
+      if (!Number.isFinite(idleMs)) {
+        return [];
       }
-    }
-    if (this.#spare !== undefined) {
-      const spare = this.#spare;
-      this.#spare = undefined;
-      await spare.promise
-        .then((session) => session.close())
-        .catch(() => undefined);
-    }
-    return closed;
+      const cutoff = this.#now() - idleMs;
+      const closed: string[] = [];
+      for (const [id, binding] of this.#bindings) {
+        if (binding.lastUsed <= cutoff && !this.#isBusy(id)) {
+          await this.#closeBinding(binding);
+          this.#bindings.delete(id);
+          closed.push(id);
+        }
+      }
+      if (this.#spare !== undefined && this.#spare.lastUsed <= cutoff) {
+        await this.#closeSpare();
+      }
+      return closed;
+    });
   }
 
-  /**
-   * Pre-warms one child for the most recent (root, env). A spare is adopted by
-   * the next conversation that wants the same pair, which is the whole point:
-   * it turns the next `:new` from a 0.8 s cold start into nothing.
-   */
+  /** Prewarming uses only a free slot; it never evicts a conversation. */
   warmSpare(root: string, env: Record<string, string>): void {
-    if (!this.#config.pool.spare) {
+    if (!this.#config.pool.spare || this.#closing) {
       return;
     }
-    const envHash = envFingerprint(env);
-    if (this.#spare?.envHash === envHash && this.#spare.root === root) {
-      return;
-    }
-    void this.#spare?.promise
-      .then((session) => session.close())
-      .catch(() => undefined);
-    this.#spare = {
-      root,
-      env,
-      envHash,
-      promise: this.#backend.open({ root, env }).catch((cause: unknown) => {
-        // A spare that cannot start is not a reason to fail the turn that
-        // triggered it; the next turn spawns its own child anyway.
+    void this.#mutate(async () => {
+      if (this.#closing) {
+        return;
+      }
+      const envHash = envFingerprint(env);
+      if (
+        this.#spare?.envHash === envHash &&
+        this.#spare.root === root &&
+        this.#spare.session?.isAlive !== false
+      ) {
+        return;
+      }
+      if (this.#spare !== undefined) {
+        await this.#closeSpare();
+      }
+      if (
+        this.#closing ||
+        this.stats().children >= Math.max(1, this.#config.pool.maxChildren)
+      ) {
+        return;
+      }
+      const spare: Spare = {
+        root,
+        envHash,
+        lastUsed: this.#now(),
+        session: undefined,
+        closed: false,
+      };
+      this.#spare = spare;
+      try {
+        spare.session = await this.#backend.open({ root, env });
+      } catch (cause) {
+        this.#spare = undefined;
         this.#log?.("could not pre-warm a spare agent child", {
           cause: messageOf(cause),
         });
-        throw cause;
-      }),
-    };
-    // A rejected spare promise must not become an unhandled rejection.
-    this.#spare.promise.catch(() => undefined);
+      }
+    }).catch((cause: unknown) => {
+      this.#log?.("could not pre-warm a spare agent child", {
+        cause: messageOf(cause),
+      });
+    });
   }
 
-  /** Takes the spare when it matches, so a warm child is actually used. */
-  async takeSpare(
+  async #adoptSpare(
+    request: AcquireRequest,
+    envHash: string,
+  ): Promise<AgentSession | undefined> {
+    const spare = this.#spare;
+    const session = spare?.session;
+    if (
+      spare === undefined ||
+      session === undefined ||
+      session.isAlive === false ||
+      spare.root !== request.root ||
+      spare.envHash !== envHash ||
+      (request.native !== undefined &&
+        Object.keys(request.native).length > 0) ||
+      (request.title !== undefined && session.rename === undefined) ||
+      (request.thinking !== undefined && session.setThinking === undefined) ||
+      // Persona tools must be applied by the spawn plan, even when a
+      // configured backend claims that its bridge can switch them live.
+      request.persona !== undefined
+    ) {
+      return undefined;
+    }
+    try {
+      if (request.title !== undefined) await session.rename!(request.title);
+      if (request.model !== undefined) await session.setModel(request.model);
+      if (request.thinking !== undefined)
+        await session.setThinking!(request.thinking);
+    } catch (cause) {
+      await this.#closeSpare();
+      throw cause;
+    }
+    this.#assertOpen();
+    this.#bindings.set(request.conversationId, {
+      conversationId: request.conversationId,
+      root: request.root,
+      envHash,
+      session,
+      lastUsed: this.#now(),
+      persona: request.persona,
+      crashes: [],
+      degraded: false,
+      crashObserved: false,
+      closed: false,
+    });
+    this.#spare = undefined;
+    return session;
+  }
+
+  /** Compatibility entry point for callers explicitly adopting a fresh spare. */
+  takeSpare(
     conversationId: string,
     root: string,
     env: Record<string, string>,
   ): Promise<void> {
-    const spare = this.#spare;
-    if (spare === undefined) {
-      return;
-    }
-    const envHash = envFingerprint(env);
-    if (spare.root !== root || spare.envHash !== envHash) {
-      return;
-    }
-    this.#spare = undefined;
-    const binding: Binding = {
-      conversationId,
-      root,
-      envHash,
-      session: await spare.promise,
-      lastUsed: this.#now(),
-      turns: 0,
-      persona: undefined,
-      crashes: [],
-      degraded: false,
-    };
-    this.#bindings.set(conversationId, binding);
+    return this.#mutate(async () => {
+      this.#assertOpen();
+      if (!this.#bindings.has(conversationId)) {
+        await this.#adoptSpare(
+          { conversationId, root, env },
+          envFingerprint(env),
+        );
+      }
+    });
   }
 
-  /** Closes and forgets one conversation's child. */
-  async release(conversationId: string): Promise<void> {
-    const binding = this.#bindings.get(conversationId);
-    if (binding === undefined) {
-      return;
-    }
-    this.#bindings.delete(conversationId);
-    await binding.session.close().catch(() => undefined);
+  release(conversationId: string): Promise<void> {
+    return this.#mutate(async () => {
+      const binding = this.#bindings.get(conversationId);
+      if (binding !== undefined) {
+        await this.#closeBinding(binding);
+        this.#bindings.delete(conversationId);
+      }
+    });
   }
 
   session(conversationId: string): AgentSession | undefined {
-    return this.#bindings.get(conversationId)?.session;
+    const binding = this.#bindings.get(conversationId);
+    return binding === undefined ||
+      binding.closed ||
+      binding.session.isAlive === false
+      ? undefined
+      : binding.session;
   }
 
-  async close(): Promise<void> {
-    const bindings = [...this.#bindings.values()];
-    this.#bindings.clear();
-    const spare = this.#spare;
-    this.#spare = undefined;
-    await Promise.all(
-      bindings.map((binding) => binding.session.close().catch(() => undefined)),
-    );
-    if (spare !== undefined) {
-      await spare.promise
-        .then((session) => session.close())
-        .catch(() => undefined);
+  close(): Promise<void> {
+    this.#closing = true;
+    if (this.#closePromise === undefined) {
+      const closing = this.#mutate(async () => {
+        const failures: unknown[] = [];
+        for (const [id, binding] of this.#bindings) {
+          try {
+            await this.#closeBinding(binding);
+            this.#bindings.delete(id);
+          } catch (cause) {
+            failures.push(cause);
+          }
+        }
+        try {
+          await this.#closeSpare();
+        } catch (cause) {
+          failures.push(cause);
+        }
+        if (failures.length > 0) {
+          throw failures[0];
+        }
+      });
+      this.#closePromise = closing;
+      void closing.catch(() => {
+        if (this.#closePromise === closing) {
+          this.#closePromise = undefined;
+        }
+      });
     }
+    return this.#closePromise;
   }
-
-  // The port's optional capabilities become clear errors rather than crashes
-  // (DESIGN §4.4). These are the checks the router and the CLI call before
-  // reaching for a method that may not be there.
 
   require(capability: keyof AgentBackend["capabilities"]): void {
     if (this.#backend.capabilities[capability] !== true) {
@@ -403,11 +531,6 @@ export class AgentPool {
   }
 
   async models(conversationId: string): Promise<ModelInfo[]> {
-    const session = this.#requireSession(conversationId);
-    return session.listModels();
-  }
-
-  #requireSession(conversationId: string): AgentSession {
     const session = this.session(conversationId);
     if (session === undefined) {
       throw new PrefaixError(
@@ -416,6 +539,6 @@ export class AgentPool {
         { hint: "Run a `:` in that shell first, or use :new." },
       );
     }
-    return session;
+    return session.listModels();
   }
 }

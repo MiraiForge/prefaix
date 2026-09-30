@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   AgentEvent,
   AgentEventOf,
@@ -15,6 +15,7 @@ import {
 } from "../../src/agents/fake/adapter.js";
 import {
   SCENARIO_NAMES,
+  BURST_TEXT_EVENTS,
   answerText,
   type ScenarioName,
 } from "../../src/agents/fake/scenarios.js";
@@ -193,6 +194,7 @@ describe("fake backend selection", () => {
     // added and cannot name is a scenario nobody will ever run.
     expect(SCENARIO_NAMES).toEqual([
       "buffer",
+      "burst",
       "dialog",
       "error",
       "hello",
@@ -216,7 +218,7 @@ describe("fake backend selection", () => {
       installed: true,
       usable: false,
       problem: 'unknown fake scenario "nope"',
-      hint: "Set PREFAIX_FAKE_SCENARIO to one of: buffer, dialog, error, hello, long, markdown, retry, tools",
+      hint: "Set PREFAIX_FAKE_SCENARIO to one of: buffer, burst, dialog, error, hello, long, markdown, retry, tools",
     });
   });
 
@@ -825,6 +827,12 @@ describe("fake session commands", () => {
 
   it("sets and rejects thinking levels", async () => {
     const open = await session("hello", { sleep: async () => {} });
+    expect(await open.listThinkingLevels()).toEqual([
+      "off",
+      "low",
+      "medium",
+      "high",
+    ]);
     expect((await open.state()).thinking).toBe("off");
     await open.setThinking("high");
     expect((await open.state()).thinking).toBe("high");
@@ -896,7 +904,7 @@ describe("fake registry wiring", () => {
       env: { PREFAIX_FAKE_SCENARIO: "tools" },
     });
     expect(backend.id).toBe("fake");
-    expect((backend as FakeAgent).scenarioName).toBe("tools");
+    expect((await backend.probe()).version).toBe("fake/tools");
   });
 
   it("refuses a backend it cannot build", async () => {
@@ -1212,5 +1220,90 @@ describe("fake registry wiring without options", () => {
     // No options at all: the factory must not require an env object.
     const backend = createBackend("fake");
     await expect(backend.probe()).resolves.toMatchObject({ usable: true });
+  });
+});
+
+describe("bounded fake event burst", () => {
+  it("emits exactly 2000 ordered text chunks and one terminal settle without timers", async () => {
+    const agent = createFakeAgent({ env: { PREFAIX_FAKE_SCENARIO: "burst" } });
+    const opened = await agent.open(openOptions());
+    const timer = vi.spyOn(globalThis, "setTimeout");
+    let events: AgentEvent[];
+    try {
+      events = await collect(opened as FakeSession);
+      expect(timer).not.toHaveBeenCalled();
+    } finally {
+      timer.mockRestore();
+    }
+    const text = events.filter(
+      (event): event is AgentEventOf<"text_delta"> =>
+        event.type === "text_delta",
+    );
+    expect(text).toHaveLength(BURST_TEXT_EVENTS);
+    expect(events).toHaveLength(BURST_TEXT_EVENTS + 4);
+    expect(text.map((event) => event.text)).toEqual(
+      Array.from(
+        { length: BURST_TEXT_EVENTS },
+        (_, index) => `burst:${String(index)}\n`,
+      ),
+    );
+    expect(events.at(-1)).toEqual({ type: "settled", stopReason: "stop" });
+    expect(await opened.lastAssistantText()).toBe(
+      text.map((event) => event.text).join(""),
+    );
+    await opened.close();
+  });
+  it("keeps ordinary pacing and respects an explicit burst pacing override", async () => {
+    for (const [scenario, tickMs] of [
+      ["hello", undefined],
+      ["burst", undefined],
+      ["burst", 7],
+    ] as const) {
+      const ticks: number[] = [];
+      const agent = createFakeAgent({
+        scenario,
+        ...(tickMs === undefined ? {} : { tickMs }),
+        sleep: async (ms) => {
+          ticks.push(ms);
+        },
+      });
+      const opened = await agent.open(openOptions());
+      await collect(opened as FakeSession);
+      expect(ticks.length).toBeGreaterThan(0);
+      expect(new Set(ticks)).toEqual(
+        new Set([tickMs ?? (scenario === "burst" ? 0 : 12)]),
+      );
+      await opened.close();
+    }
+  });
+  it("does not unpace a custom script merely because its label is burst", async () => {
+    const ticks: number[] = [];
+    const agent = createFakeAgent({
+      scenario: "burst",
+      steps: [{ type: "turn_start" }, { type: "settled", stopReason: "stop" }],
+      sleep: async (ms) => {
+        ticks.push(ms);
+      },
+    });
+    const opened = await agent.open(openOptions());
+    await collect(opened as FakeSession);
+    expect(ticks).toEqual([12]);
+    await opened.close();
+  });
+  it("can be aborted partway through the bounded burst", async () => {
+    const opened = await createFakeAgent({ scenario: "burst" }).open(
+      openOptions(),
+    );
+    const controller = new AbortController();
+    const events: AgentEvent[] = [];
+    for await (const event of opened.prompt(input(), controller.signal)) {
+      events.push(event);
+      if (events.length === 101) controller.abort();
+    }
+    expect(events.filter((event) => event.type === "text_delta")).toHaveLength(
+      100,
+    );
+    expect(events.at(-1)).toEqual({ type: "settled", stopReason: "aborted" });
+    await opened.close();
   });
 });

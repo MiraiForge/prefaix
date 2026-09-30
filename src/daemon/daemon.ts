@@ -7,7 +7,7 @@
 // any moment between turns. Detach and attach in M4 need exactly that.
 
 import { appendFile, mkdir, rename, stat } from "node:fs/promises";
-import { PrefaixError } from "../core/errors.js";
+import { PrefaixError, messageOf } from "../core/errors.js";
 import { createLogger, type Logger } from "../core/log.js";
 import { resolvePaths } from "../core/paths.js";
 import type { PrefaixPaths as Paths } from "../core/paths.js";
@@ -63,10 +63,13 @@ export class Daemon {
   readonly #ops: Operations;
   readonly #startedAt: number;
   readonly #onIdleCheck: (() => Promise<boolean>) | undefined;
+  readonly #logWrites = new Set<Promise<void>>();
   #lock: LockHandle | undefined;
   #timer: ReturnType<typeof setInterval> | undefined;
   #lastActivity = 0;
   #stopping = false;
+  #stopPromise: Promise<void> | undefined;
+  #ticking = false;
   #stopped: (() => void) | undefined;
 
   constructor(options: DaemonOptions) {
@@ -83,9 +86,11 @@ export class Daemon {
       scope: "daemon",
       level: "info",
       write: (line) => {
-        void appendFile(this.#paths.daemonLog, `${line}\n`, {
+        const writing = appendFile(this.#paths.daemonLog, `${line}\n`, {
           mode: 0o600,
         }).catch(() => undefined);
+        this.#logWrites.add(writing);
+        void writing.then(() => this.#logWrites.delete(writing));
       },
     });
 
@@ -100,13 +105,17 @@ export class Daemon {
       paths: this.#paths,
       log: this.#log.warn,
     });
+    this.#turns = new TurnManager({
+      now: this.#now,
+      retainedTurns: this.#config.pool.maxChildren,
+    });
     this.#pool = new AgentPool({
       backend,
       config: this.#config,
       log: this.#log.info,
       now: this.#now,
+      isBusy: (id) => this.#turns.runningFor(id) !== undefined,
     });
-    this.#turns = new TurnManager({ now: this.#now });
     this.#status = createStatusFiles(this.#paths);
 
     this.#ops = new Operations({
@@ -185,17 +194,26 @@ export class Daemon {
       backend: this.#config.agent.backend,
     });
     this.#timer = setInterval(() => {
-      void this.#tick();
+      void this.#tick().catch((cause) => {
+        this.#log.warn("idle cleanup failed", { cause: messageOf(cause) });
+      });
     }, this.#idleTickMs);
     this.#timer.unref();
   }
 
   /** Stops and waits for the socket to be gone, which is what autospawn waits on. */
-  async stop(): Promise<void> {
-    if (this.#stopping) {
-      return;
-    }
+  stop(): Promise<void> {
+    if (this.#stopPromise !== undefined) return this.#stopPromise;
+    this.#stopPromise = this.#stop().catch((cause) => {
+      this.#stopPromise = undefined;
+      throw cause;
+    });
+    return this.#stopPromise;
+  }
+
+  async #stop(): Promise<void> {
     this.#stopping = true;
+    this.#ops.beginShutdown();
     if (this.#timer !== undefined) {
       clearInterval(this.#timer);
       this.#timer = undefined;
@@ -205,7 +223,13 @@ export class Daemon {
       this.#turns.abort(turn);
     }
     await this.#pool.close();
+    // Closing transports unblocks aborted streams. Wait for their metadata
+    // before releasing the lock to a replacement daemon.
+    await this.#ops.drain();
     await this.#server.close();
+    while (this.#logWrites.size > 0) {
+      await Promise.all([...this.#logWrites]);
+    }
     await this.#lock?.release();
     this.#stopped?.();
   }
@@ -232,6 +256,9 @@ export class Daemon {
     params: unknown,
     connection: Connection,
   ): Promise<unknown> {
+    if (this.#stopping) {
+      throw new PrefaixError("DAEMON_UNAVAILABLE", "the daemon is stopping");
+    }
     switch (op) {
       case "turn.start":
         return this.#ops.turnStart(params as never, connection);
@@ -243,6 +270,10 @@ export class Daemon {
         return this.#ops.convRemove(params as never);
       case "ui.respond":
         return this.#ops.uiRespond(params as never);
+      case "conv.select":
+        return this.#ops.convSelect(params as never);
+      case "conv.previous":
+        return this.#ops.convPrevious(params as never);
       case "conv.new":
         return this.#ops.convNew(params as never);
       case "conv.list":
@@ -259,6 +290,8 @@ export class Daemon {
         return this.#ops.modelList(params as never);
       case "model.set":
         return this.#ops.modelSet(params as never);
+      case "thinking.list":
+        return this.#ops.thinkingList(params as never);
       case "thinking.set":
         return this.#ops.thinkingSet(params as never);
       case "commands.list":
@@ -282,18 +315,18 @@ export class Daemon {
    * pool's bookkeeping, and a pre-warmed spare for the next `:new` in the same
    * root with the same environment.
    */
-  #onTurnEnd(
+  async #onTurnEnd(
     turn: TurnHandle,
     summary: TurnSummary,
     info: { root: string; env: Record<string, string> },
-  ): void {
+  ): Promise<void> {
     this.#lastActivity = this.#now();
     // An abort is not a failure the user needs to see on their next prompt; a
     // crash is.
     const status = summary.status === "error" ? "error" : "done";
-    void this.#status.writeStatus(turn.shellId, status).catch(() => undefined);
+    await this.#status.writeStatus(turn.shellId, status).catch(() => undefined);
     this.#pool.touch(turn.conversationId);
-    this.#pool.warmSpare(info.root, info.env);
+    if (!this.#stopping) this.#pool.warmSpare(info.root, info.env);
     this.#log.info("turn finished", {
       turn: turn.id,
       conversation: turn.conversationId,
@@ -308,23 +341,28 @@ export class Daemon {
    * waiting half an hour.
    */
   async #tick(): Promise<void> {
-    if (this.#stopping) {
+    if (this.#stopping || this.#ticking) {
       return;
     }
-    const busy =
-      this.#turns.count > 0 ||
-      this.#server.connections > 0 ||
-      (this.#onIdleCheck !== undefined && (await this.#onIdleCheck()));
-    if (busy) {
-      this.#lastActivity = this.#now();
-      return;
+    this.#ticking = true;
+    try {
+      await this.#pool.sweepIdle();
+      if (this.#stopping) return;
+      const busy =
+        this.#turns.count > 0 ||
+        this.#server.connections > 0 ||
+        (this.#onIdleCheck !== undefined && (await this.#onIdleCheck()));
+      if (busy) {
+        this.#lastActivity = this.#now();
+        return;
+      }
+      const idleMs = this.#now() - this.#lastActivity;
+      if (idleMs < this.#idleMinutes * 60_000) return;
+      this.#log.info("exiting after idle", { idleMs });
+      await this.stop();
+    } finally {
+      this.#ticking = false;
     }
-    const idleMs = this.#now() - this.#lastActivity;
-    if (idleMs < this.#idleMinutes * 60_000) {
-      return;
-    }
-    this.#log.info("exiting after idle", { idleMs });
-    await this.stop();
   }
 
   /** True when nothing is in flight, for a status line or a test. */

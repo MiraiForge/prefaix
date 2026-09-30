@@ -6,6 +6,16 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      flake_gate:
+        description: Run the 50-rerun M3 stability gate
+        type: boolean
+        default: false
+      pi_smoke:
+        description: Install pi and run the no-model smoke
+        type: boolean
+        default: false
+  workflow_call:
 
 permissions:
   contents: read
@@ -18,12 +28,12 @@ jobs:
   check:
     name: Check (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: [22, 24]
+        node: [22, 24, 26]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -39,26 +49,136 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Lint, typecheck, and unit tests
-        run: bun run lint && bun run typecheck && bun run test:unit
+        run: bun run lint && bun run typecheck && bun run test:unit && bun run docs:check
       - name: AgentPort contract suite (fake and pi fixture)
         run: bun run test:contract
       - name: Install shells for the end-to-end gates
-        # zsh and bash 5 on Linux; macOS already has both, and runs bash 3.2 in
-        # its degraded mode. fish is installed on neither until the harness
-        # drives it, which it does not yet.
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
             sudo apt-get update
-            sudo apt-get install -y zsh
-            # A fresh zsh finds the runner's own directories insecure and asks a
-            # question on an interactive startup; the harness would sit there.
-            compaudit || true
+            sudo apt-get install -y zsh fish
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install bash fish
           fi
       - name: Shell end-to-end (pty harness)
         run: bun run test:e2e
+        env:
+          PREFAIX_E2E_REQUIRED: "1"
       - name: Coverage against the 95% target
         run: bun run coverage
-      - name: Full check
-        run: bun run check
-      - name: Build available entry points
-        run: bun run build
+      - name: Compare Node and compiled Bun startup (S8, 50 samples)
+        run: bun run spike:client-startup
+        env:
+          PREFAIX_STARTUP_REPORT: ${{ runner.temp }}/prefaix-startup.json
+      - name: Preserve startup comparison
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: startup-${{ matrix.os }}-node${{ matrix.node }}
+          path: ${{ runner.temp }}/prefaix-startup.json
+          if-no-files-found: ignore
+      - name: Built CLI performance budgets (50 samples)
+        run: bun run test:perf
+        env:
+          PREFAIX_PERF_REPORT: ${{ runner.temp }}/prefaix-performance.json
+      - name: Preserve performance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: performance-${{ matrix.os }}-node${{ matrix.node }}
+          path: ${{ runner.temp }}/prefaix-performance.json
+          if-no-files-found: ignore
+
+  shell-versions:
+    name: Shells (${{ matrix.os }}, bash ${{ matrix.bash }}, fish ${{ matrix.fish }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bash: "4.4"
+            fish: "3.6.4"
+          - os: ubuntu-latest
+            bash: "5.2"
+            fish: "4.0.2"
+          - os: macos-latest
+            bash: "4.4"
+            fish: "3.6.4"
+          - os: macos-latest
+            bash: "5.2"
+            fish: "4.0.2"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.3.14"
+      - name: Install native build dependencies
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y zsh cmake build-essential libncurses-dev libpcre2-dev gettext
+          else
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install cmake ncurses pcre2 gettext rust
+          fi
+      - name: Build the exact supported shell versions
+        env:
+          BASH_VERSION_UNDER_TEST: ${{ matrix.bash }}
+          FISH_VERSION_UNDER_TEST: ${{ matrix.fish }}
+        run: |
+          node scripts/install-test-shell.mjs bash "$BASH_VERSION_UNDER_TEST" "$RUNNER_TEMP/bash"
+          node scripts/install-test-shell.mjs fish "$FISH_VERSION_UNDER_TEST" "$RUNNER_TEMP/fish"
+          echo "PREFAIX_E2E_BASH=$RUNNER_TEMP/bash/bin/bash" >> "$GITHUB_ENV"
+          echo "PREFAIX_E2E_FISH=$RUNNER_TEMP/fish/bin/fish" >> "$GITHUB_ENV"
+      - run: bun install --frozen-lockfile
+      - run: bun run test:e2e
+        env:
+          PREFAIX_E2E_REQUIRED: "1"
+      - name: M3 stability gate (50 reruns)
+        if: inputs.flake_gate == true || startsWith(github.ref, 'refs/tags/v')
+        run: bun run test:flake
+        env:
+          PREFAIX_E2E_REQUIRED: "1"
+      - name: Preserve stability logs
+        if: always() && (inputs.flake_gate == true || startsWith(github.ref, 'refs/tags/v'))
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: stability-${{ matrix.os }}-bash${{ matrix.bash }}-fish${{ matrix.fish }}
+          path: build/flake
+          if-no-files-found: ignore
+
+  pi-smoke:
+    name: Pi no-model smoke
+    if: inputs.pi_smoke == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.3.14"
+      - run: npm install --global @mariozechner/pi-coding-agent@0.87.1
+      - run: bun install --frozen-lockfile
+      - run: bun run test:pi-smoke
+
+  required:
+    name: M3 required checks
+    if: always()
+    needs: [check, shell-versions]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every validation matrix entry
+        env:
+          CHECK_RESULT: ${{ needs.check.result }}
+          SHELL_RESULT: ${{ needs.shell-versions.result }}
+        run: test "$CHECK_RESULT" = success && test "$SHELL_RESULT" = success

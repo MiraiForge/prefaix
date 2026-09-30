@@ -2,9 +2,10 @@
 // The bin. Everything else lives in the modules this dispatches to; keeping the
 // entry this small is what makes `prefaix run` a fast start (DESIGN §9).
 
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { main } from "./index.js";
+import { prepareDaemonRuntime } from "./daemon-runtime.js";
 import type { ExitCode } from "../core/errors.js";
 
 /**
@@ -17,7 +18,12 @@ export function cliVersion(
 ): string {
   try {
     const here = fileURLToPath(
-      new URL("../../../package.json", import.meta.url),
+      new URL(
+        import.meta.url.endsWith("/src/cli/bin.ts")
+          ? "../../package.json"
+          : "../package.json",
+        import.meta.url,
+      ),
     );
     const parsed = JSON.parse(read(here)) as { version?: string };
     return parsed.version ?? "0.0.0";
@@ -39,7 +45,7 @@ export function isEntry(url: string, argv1: string | undefined): boolean {
     return false;
   }
   try {
-    return pathToFileURL(argv1).href === url;
+    return pathToFileURL(realpathSync(argv1)).href === url;
   } catch {
     return false;
   }
@@ -48,5 +54,6 @@ export function isEntry(url: string, argv1: string | undefined): boolean {
 if (isEntry(import.meta.url, process.argv[1])) {
   // The terminal is already back in cooked mode by the time this resolves: the
   // client restores it on every exit path, including the ones that threw.
-  process.exitCode = await runCli(process.argv.slice(2));
+  process.exitCode =
+    prepareDaemonRuntime() ?? (await runCli(process.argv.slice(2)));
 }

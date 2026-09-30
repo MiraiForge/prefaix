@@ -7,9 +7,18 @@
 // which child runs, and whether a `cd` out of the root starts a new
 // conversation, is prefaix's call (DESIGN §4.3.6).
 
-import { execFile } from "node:child_process";
+import {
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { join } from "node:path";
+import { shellHintsFile } from "../core/paths.js";
 import { PrefaixError, unsupported, messageOf } from "../core/errors.js";
-import { newRecord, summarize } from "./store.js";
+import { newRecord, summarize, titleFrom } from "./store.js";
 import type { ConversationRecord, ConversationStore } from "./store.js";
 import type {
   AgentEvent,
@@ -22,6 +31,7 @@ import type { TurnHandle, TurnManager } from "./turns.js";
 import { personaSpec } from "../core/config/index.js";
 import type { PrefaixConfig } from "../core/config/schema.js";
 import type {
+  CommandsListParams,
   ConvGetParams,
   ConvLastTextParams,
   ConvListParams,
@@ -29,6 +39,8 @@ import type {
   ConvRenameParams,
   ConversationSummary,
   ModelSetParams,
+  ModelListParams,
+  ShellVersionInfo,
   StatusSnapshot,
   ThinkingSetParams,
   TurnStartParams,
@@ -61,8 +73,9 @@ export async function workspaceRoot(
 ): Promise<string> {
   const run =
     options.run ??
-    ((bin, args, opts) =>
-      new Promise((resolve) => {
+    (async (bin, args, opts) => {
+      const { execFile } = await import("node:child_process");
+      return new Promise<string | undefined>((resolve) => {
         execFile(
           bin,
           [...args],
@@ -71,7 +84,8 @@ export async function workspaceRoot(
             resolve(error ? undefined : stdout.trim());
           },
         );
-      }));
+      });
+    });
   const toplevel = await run("git", ["rev-parse", "--show-toplevel"], { cwd });
   const root = toplevel?.trim() ?? "";
   return root === "" ? cwd : root;
@@ -93,7 +107,7 @@ export interface OpsOptions {
     turn: TurnHandle,
     summary: TurnSummary,
     info: { root: string; env: Record<string, string> },
-  ) => void;
+  ) => void | Promise<void>;
   readonly log?: (message: string, fields?: Record<string, unknown>) => void;
 }
 
@@ -101,9 +115,37 @@ export class Operations {
   readonly #options: OpsOptions;
   /** turn id -> the connection that owns it, so a close knows what to abort. */
   readonly #owned = new Map<string, Connection>();
+  readonly #pending = new Set<Promise<unknown>>();
+  #closing = false;
 
   constructor(options: OpsOptions) {
     this.#options = options;
+  }
+
+  /** Refuse new turns while shutdown waits for starts and outcome writes. */
+  beginShutdown(): void {
+    this.#closing = true;
+  }
+
+  async drain(): Promise<void> {
+    while (this.#pending.size > 0) {
+      await Promise.allSettled([...this.#pending]);
+    }
+  }
+
+  #track<T>(pending: Promise<T>): Promise<T> {
+    this.#pending.add(pending);
+    void pending.then(
+      () => this.#pending.delete(pending),
+      () => this.#pending.delete(pending),
+    );
+    return pending;
+  }
+
+  #checkOpen(): void {
+    if (this.#closing) {
+      throw new PrefaixError("DAEMON_UNAVAILABLE", "the daemon is stopping");
+    }
   }
 
   /**
@@ -151,6 +193,97 @@ export class Operations {
     await this.#options.store.save(record);
     this.#options.log?.("new conversation", { id: record.id, root });
     return summarize(record);
+  }
+
+  async convSelect(params: {
+    conversationId: string;
+    shell: ShellVersionInfo;
+    previousConversationId?: string;
+  }): Promise<ConversationSummary> {
+    const record = await this.#require(params.conversationId);
+    const paths = this.#options.store.paths;
+    const file = shellHintsFile(paths, params.shell.shellId);
+    const previous = await this.#shellHints(params.shell.shellId);
+    const oldId = params.previousConversationId || previous.current;
+    const hints = {
+      pid: params.shell.pid,
+      current: record.id,
+      previous:
+        oldId !== undefined && oldId !== record.id ? oldId : previous.previous,
+      roots: { ...previous.roots, [record.root]: record.id },
+    };
+    await mkdir(paths.shellHintsDir, { recursive: true, mode: 0o700 });
+    const temp = `${file}.${String(process.pid)}.tmp`;
+    await writeFile(temp, JSON.stringify(hints), { mode: 0o600 });
+    await rename(temp, file);
+    // Only our validated hint files are considered, and EPERM means alive.
+    for (const name of await readdir(paths.shellHintsDir)) {
+      if (!name.endsWith(".json") || name === `${params.shell.shellId}.json`)
+        continue;
+      try {
+        const other = JSON.parse(
+          await readFile(join(paths.shellHintsDir, name), "utf8"),
+        ) as { pid?: number };
+        if (typeof other.pid === "number" && other.pid > 0) {
+          try {
+            process.kill(other.pid, 0);
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code === "ESRCH")
+              await unlink(join(paths.shellHintsDir, name));
+          }
+        }
+      } catch {
+        /* A stale or malformed hint must not block a switch. */
+      }
+    }
+    return summarize(record);
+  }
+
+  async #shellHints(shellId: string): Promise<{
+    current?: string;
+    previous?: string;
+    roots?: Record<string, string>;
+  }> {
+    const file = shellHintsFile(this.#options.store.paths, shellId);
+    try {
+      const raw: unknown = JSON.parse(await readFile(file, "utf8"));
+      if (typeof raw !== "object" || raw === null) return {};
+      const hints = raw as Record<string, unknown>;
+      return {
+        ...(typeof hints["current"] === "string"
+          ? { current: hints["current"] }
+          : {}),
+        ...(typeof hints["previous"] === "string"
+          ? { previous: hints["previous"] }
+          : {}),
+        ...(typeof hints["roots"] === "object" && hints["roots"] !== null
+          ? {
+              roots: Object.fromEntries(
+                Object.entries(hints["roots"]).filter(
+                  (entry): entry is [string, string] =>
+                    typeof entry[1] === "string",
+                ),
+              ),
+            }
+          : {}),
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  async convPrevious(params: {
+    shellId: string;
+    fallback?: string;
+  }): Promise<ConversationSummary> {
+    const hints = await this.#shellHints(params.shellId);
+    const id = params.fallback || hints.previous;
+    if (id === undefined)
+      throw new PrefaixError(
+        "USAGE",
+        "there is no previous conversation in this shell",
+      );
+    return summarize(await this.#require(id));
   }
 
   async convList(
@@ -228,6 +361,8 @@ export class Operations {
     // The replay goes to the socket that asked for it, not to whoever owned the
     // turn: the point of attaching is that the original client is gone.
     const from = Math.max(1, params.fromSeq);
+    const oldestSeq = turn.ring.oldestSeq;
+    const summary = turn.summary;
     for (const entry of turn.ring.since(from)) {
       this.#options.send(connection, {
         t: "evt",
@@ -235,18 +370,21 @@ export class Operations {
         seq: entry.seq,
         e: entry.event,
       });
+      const pending = connection.waitWritable?.();
+      if (pending !== undefined) await pending;
+      if (connection.closed) break;
     }
-    if (turn.summary !== undefined) {
+    if (summary !== undefined && !connection.closed) {
       this.#options.send(connection, {
         t: "turn.end",
         turnId: turn.id,
-        summary: turn.summary,
+        summary,
       });
     }
     // The oldest sequence still held, so a client that asked to replay from
     // further back can be told where the gap starts instead of being handed a
     // stream with a hole in it.
-    return { turnId: turn.id, fromSeq: turn.ring.oldestSeq };
+    return { turnId: turn.id, fromSeq: oldestSeq };
   }
 
   async convLastText(
@@ -254,11 +392,20 @@ export class Operations {
   ): Promise<{ text: string | null }> {
     const session = this.#options.pool.session(params.conversationId);
     if (session === undefined) {
-      // The child is not warm, so the answer is not one prefaix can produce
-      // without paying a cold start for a `:` that may never come.
-      return { text: null };
+      return {
+        text:
+          (await this.#options.store.get(params.conversationId))
+            ?.lastAssistantText ?? null,
+      };
     }
-    return { text: await session.lastAssistantText() };
+    const text = await session.lastAssistantText();
+    return {
+      text:
+        text ??
+        (await this.#options.store.get(params.conversationId))
+          ?.lastAssistantText ??
+        null,
+    };
   }
 
   async convCompact(
@@ -276,12 +423,35 @@ export class Operations {
 
   // ── turns ──────────────────────────────────────────────────────────────
 
-  async turnStart(
+  turnStart(
     params: TurnStartParams,
     connection: Connection,
   ): Promise<TurnStartResult> {
+    return this.#track(this.#startTurn(params, connection));
+  }
+
+  async #startTurn(
+    params: TurnStartParams,
+    connection: Connection,
+  ): Promise<TurnStartResult> {
+    this.#checkOpen();
+    if (params.text.startsWith("/"))
+      this.#options.pool.require("slashCommands");
+    const persona = this.#persona(params.persona);
     const resolved = await this.#resolveConversation(params);
-    const record = await this.#applyCwdPolicy(resolved.record, params.cwd);
+    let record = await this.#applyCwdPolicy(resolved.record, params.cwd);
+    const startupPatch: Partial<ConversationRecord> = {};
+    if (
+      record.id === resolved.record.id &&
+      record.root !== resolved.record.root
+    ) {
+      startupPatch.root = record.root;
+    }
+    if (record.title === "new conversation" && record.stats.turns === 0) {
+      record = { ...record, title: titleFrom(params.text) };
+      startupPatch.title = record.title;
+    }
+    this.#checkOpen();
     const turn = this.#options.turns.start({
       conversationId: record.id,
       shellId: params.shell.shellId,
@@ -292,33 +462,58 @@ export class Operations {
     });
     this.#owned.set(turn.id, connection);
 
-    const persona = this.#persona(params.persona);
     // The native handle is what lets a respawn continue the same transcript,
     // so it is read from the warm child when there is one and from the record
     // otherwise.
     const warm = this.#options.pool.session(record.id);
     const native = warm?.native ?? record.native;
 
-    const agent = await this.#options.pool.acquire({
-      conversationId: record.id,
-      root: record.root,
-      env: params.env,
-      title: record.title,
-      ...(record.model === undefined ? {} : { model: record.model }),
-      ...(record.thinking === undefined ? {} : { thinking: record.thinking }),
-      ...(persona === undefined ? {} : { persona }),
-      native,
-    });
-
-    if (persona !== undefined) {
-      await this.#options.store
-        .update(record.id, { persona: persona.name })
-        .catch(() => undefined);
+    let agent: AgentSession;
+    try {
+      // Apply intentional changes after claiming ownership. Later handle
+      // persistence must not copy a stale title over another shell's rename.
+      if (Object.keys(startupPatch).length > 0) {
+        record = await this.#options.store.update(record.id, startupPatch);
+      }
+      this.#checkOpen();
+      agent = await this.#options.pool.acquire({
+        conversationId: record.id,
+        root: record.root,
+        env: params.env,
+        title: record.title,
+        ...(record.model === undefined ? {} : { model: record.model }),
+        ...(record.thinking === undefined ? {} : { thinking: record.thinking }),
+        ...(persona === undefined ? {} : { persona }),
+        native,
+      });
+      this.#checkOpen();
+      // A crash after the first tool executes must still leave a resumable
+      // transcript. Commit its handle before permitting any prompt side effect.
+      record = await this.#options.store.update(record.id, {
+        native: { ...record.native, ...agent.native },
+        ...(persona === undefined ? {} : { persona: persona.name }),
+      });
+      this.#checkOpen();
+    } catch (cause) {
+      this.#owned.delete(turn.id);
+      this.#options.turns.finish(turn, {
+        turnId: turn.id,
+        status: "error",
+        error: messageOf(cause),
+      });
+      throw cause;
     }
+
     // The turn is already registered, so a prompt failure is reported through
     // the same event stream and settle path as any other turn outcome rather
     // than as a lost response to `turn.start`.
-    void this.#pump(record, turn, agent, params, persona);
+    void this.#track(this.#pump(record, turn, agent, params, persona)).catch(
+      (cause) =>
+        this.#options.log?.("could not deliver the turn outcome", {
+          turn: turn.id,
+          cause: messageOf(cause),
+        }),
+    );
     for (const notice of resolved.notices) {
       this.publish(turn, notice);
     }
@@ -369,7 +564,8 @@ export class Operations {
       });
       return created;
     }
-    await this.#options.store.update(record.id, { root });
+    // Persist only after claiming turn ownership, so a second shell cannot
+    // change the root of a conversation whose first turn is still running.
     return { ...record, root };
   }
 
@@ -411,6 +607,10 @@ export class Operations {
           this.#options.turns.openDialog(turn, event.id);
         }
         this.publish(turn, event);
+        const pending = this.#owned
+          .get(turn.id)
+          ?.waitWritable?.(turn.controller.signal);
+        if (pending !== undefined) await pending;
       }
     } catch (cause) {
       const message = messageOf(cause);
@@ -431,17 +631,49 @@ export class Operations {
       });
     }
 
-    this.#options.turns.finish(turn, summary);
-    const owner = this.#owned.get(turn.id);
-    this.#owned.delete(turn.id);
     // The record is written before the client is told the turn ended, so a
     // `:info` or `conversations show` immediately after a turn reads a
     // conversation that already includes it.
-    await this.#recordOutcome(record.id, session, summary);
+    try {
+      await this.#recordOutcome(record.id, session, summary);
+    } catch (cause) {
+      summary = {
+        turnId: turn.id,
+        status: "error",
+        error: `could not persist the turn outcome: ${messageOf(cause)}`,
+      };
+      this.publish(turn, {
+        type: "notice",
+        level: "error",
+        text: summary.error as string,
+        source: this.#options.pool.backend.id,
+      });
+    }
+    // Publish background status before releasing the foreground. Otherwise a
+    // late daemon write can overwrite the client's final model/context status.
+    try {
+      await this.#options.onEnd(turn, summary, {
+        root: record.root,
+        env: params.env,
+      });
+    } catch (cause) {
+      summary = {
+        turnId: turn.id,
+        status: "error",
+        error: `could not finalize the turn: ${messageOf(cause)}`,
+      };
+      this.#options.log?.("could not finalize the turn", {
+        turn: turn.id,
+        cause: messageOf(cause),
+      });
+    } finally {
+      this.#options.turns.finish(turn, summary);
+    }
+    const owner = this.#owned.get(turn.id);
+    this.#owned.delete(turn.id);
     if (owner !== undefined && !owner.closed) {
       this.#options.send(owner, { t: "turn.end", turnId: turn.id, summary });
     }
-    this.#options.onEnd(turn, summary, { root: record.root, env: params.env });
   }
 
   async #recordOutcome(
@@ -469,7 +701,12 @@ export class Operations {
       state?.contextPct === undefined || state.contextPct === null
         ? record.stats.lastContextPct
         : state.contextPct;
+    const lastAssistantText = await session
+      .lastAssistantText()
+      .catch(() => null);
     const patch: Partial<ConversationRecord> = {
+      ...(lastAssistantText === null ? {} : { lastAssistantText }),
+      ...(state?.usage === undefined ? {} : { usage: state.usage }),
       native: { ...record.native, ...session.native },
       stats: {
         turns,
@@ -486,6 +723,7 @@ export class Operations {
         id: record.id,
         cause: messageOf(cause),
       });
+      throw cause;
     }
   }
 
@@ -520,49 +758,90 @@ export class Operations {
 
   // ── model, thinking, commands, status ──────────────────────────────────
 
-  async modelList(params: {
-    conversationId?: string;
-  }): Promise<{ models: unknown[]; thinkingLevels?: string[] }> {
-    const session = this.#requireWarm(params.conversationId);
-    return { models: await session.listModels() };
+  async modelList(
+    params: ModelListParams,
+  ): Promise<{ models: unknown[]; thinkingLevels?: string[] }> {
+    this.#options.pool.require("models");
+    const session = await this.#modelSession(params);
+    const thinkingLevels = this.#options.pool.backend.capabilities
+      .thinkingLevels
+      ? await session.listThinkingLevels?.()
+      : undefined;
+    return {
+      models: await session.listModels(),
+      ...(thinkingLevels === undefined ? {} : { thinkingLevels }),
+    };
   }
 
   async modelSet(
     params: ModelSetParams,
   ): Promise<{ model: { provider: string; id: string } }> {
     const record = await this.#resolveForModel(params.conversationId);
-    await this.#requireWarm(params.conversationId).setModel(params.ref);
+    this.#options.pool.require("models");
+    this.#assertIdle(record.id);
+    await (await this.#modelSession(params)).setModel(params.ref);
     await this.#options.store.update(record.id, { model: params.ref });
     return { model: params.ref };
   }
 
+  async thinkingList(params: ModelListParams): Promise<{ levels: string[] }> {
+    this.#options.pool.require("thinkingLevels");
+    const session = await this.#modelSession(params);
+    if (session.listThinkingLevels === undefined)
+      throw unsupported(this.#options.pool.backend.id, ":think");
+    return { levels: await session.listThinkingLevels() };
+  }
+
   async thinkingSet(params: ThinkingSetParams): Promise<{ level: string }> {
     const record = await this.#resolveForModel(params.conversationId);
-    const session = this.#requireWarm(params.conversationId);
+    this.#assertIdle(record.id);
+    this.#options.pool.require("thinkingLevels");
+    const session = await this.#modelSession(params);
     if (session.setThinking === undefined) {
       throw unsupported(this.#options.pool.backend.id, ":think");
     }
+    const levels = await session.listThinkingLevels?.();
+    if (levels !== undefined && !levels.includes(params.level))
+      throw new PrefaixError(
+        "USAGE",
+        `unknown thinking level ${JSON.stringify(params.level)}; choose ${levels.join(", ")}`,
+      );
     await session.setThinking(params.level);
     await this.#options.store.update(record.id, { thinking: params.level });
     return { level: params.level };
   }
 
-  async commandsList(params: { conversationId?: string }): Promise<{
+  async commandsList(params: CommandsListParams): Promise<{
     commands: { name: string; kind: string; description?: string }[];
   }> {
-    const session = this.#requireWarm(params.conversationId);
-    if (session.listCommands === undefined) {
-      throw unsupported(this.#options.pool.backend.id, ":skill");
+    this.#options.pool.require("slashCommands");
+    const temporary =
+      (params.conversationId === undefined || params.conversationId === "") &&
+      params.env !== undefined &&
+      params.cwd !== undefined;
+    const session = temporary
+      ? await this.#options.pool.backend.open({
+          root: await workspaceRoot(params.cwd!, this.#options.gitRoot ?? {}),
+          env: params.env!,
+        })
+      : params.env === undefined
+        ? this.#requireWarm(params.conversationId)
+        : await this.#modelSession(params);
+    try {
+      if (session.listCommands === undefined)
+        throw unsupported(this.#options.pool.backend.id, ":skill");
+      return {
+        commands: (await session.listCommands()).map((command) => ({
+          name: command.name,
+          kind: command.kind,
+          ...(command.description === undefined
+            ? {}
+            : { description: command.description }),
+        })),
+      };
+    } finally {
+      if (temporary) await session.close();
     }
-    return {
-      commands: (await session.listCommands()).map((command) => ({
-        name: command.name,
-        kind: command.kind,
-        ...(command.description === undefined
-          ? {}
-          : { description: command.description }),
-      })),
-    };
   }
 
   async statusGet(params: {
@@ -583,6 +862,13 @@ export class Operations {
       session === undefined
         ? undefined
         : await session.state().catch(() => undefined);
+    const usage = state?.usage ?? record?.usage;
+    const model = state?.model ?? record?.model;
+    const thinking = state?.thinking ?? record?.thinking;
+    const contextPct =
+      state?.contextPct === undefined
+        ? record?.stats.lastContextPct
+        : state.contextPct;
     return {
       version: this.#options.version,
       pid: process.pid,
@@ -592,17 +878,41 @@ export class Operations {
       turns: this.#options.turns.count,
       children: pool.children,
       ...(record === undefined ? {} : { conversation: summarize(record) }),
-      ...(state?.model === undefined ? {} : { model: state.model }),
-      ...(state?.thinking === undefined ? {} : { thinking: state.thinking }),
-      ...(state?.usage === undefined ? {} : { usage: state.usage }),
-      ...(state?.contextPct === undefined
-        ? {}
-        : { contextPct: state.contextPct }),
+      ...(model === undefined ? {} : { model }),
+      ...(thinking === undefined ? {} : { thinking }),
+      ...(usage === undefined ? {} : { usage }),
+      ...(contextPct === undefined ? {} : { contextPct }),
       state: this.#options.turns.count === 0 ? "idle" : "busy",
     };
   }
 
   // ── helpers ────────────────────────────────────────────────────────────
+
+  #assertIdle(conversationId: string): void {
+    if (this.#options.turns.runningFor(conversationId) !== undefined)
+      throw new PrefaixError(
+        "CONVERSATION_BUSY",
+        "wait for this conversation's turn to finish before changing models",
+      );
+  }
+
+  async #modelSession(params: ModelListParams): Promise<AgentSession> {
+    const record = await this.#resolveForModel(params.conversationId);
+    const warm = this.#options.pool.session(record.id);
+    if (warm !== undefined) return warm;
+    if (params.env === undefined) return this.#requireWarm(record.id);
+    const session = await this.#options.pool.acquire({
+      conversationId: record.id,
+      root: record.root,
+      env: params.env,
+      title: record.title,
+      native: record.native,
+      ...(record.model === undefined ? {} : { model: record.model }),
+      ...(record.thinking === undefined ? {} : { thinking: record.thinking }),
+    });
+    await this.#options.store.update(record.id, { native: session.native });
+    return session;
+  }
 
   #requireWarm(conversationId: string | undefined): AgentSession {
     const id = conversationId ?? this.#options.turns.active[0]?.conversationId;
@@ -638,7 +948,7 @@ export class Operations {
   async #resolveForModel(
     conversationId: string | undefined,
   ): Promise<ConversationRecord> {
-    if (conversationId !== undefined) {
+    if (conversationId !== undefined && conversationId !== "") {
       return this.#require(conversationId);
     }
     const active = this.#options.turns.active[0]?.conversationId;

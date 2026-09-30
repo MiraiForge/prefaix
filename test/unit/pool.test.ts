@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AgentPool } from "../../src/daemon/pool.js";
 import {
   createFakeAgent,
@@ -12,6 +12,7 @@ import type {
   AgentBackend,
   AgentSession,
   Capabilities,
+  OpenOptions,
 } from "../../src/core/agent-port.js";
 import type { FakeAgent } from "../../src/agents/fake/adapter.js";
 
@@ -33,6 +34,7 @@ function pool(
     config?: PrefaixConfig;
     fake?: FakeAgentOptions;
     now?: () => number;
+    isBusy?: (conversationId: string) => boolean;
   } = {},
 ): { pool: AgentPool; agent: FakeAgent } {
   const agent = createFakeAgent({ tickMs: 0, ...options.fake });
@@ -42,6 +44,7 @@ function pool(
       backend: agent,
       config: options.config ?? config(),
       ...(options.now === undefined ? {} : { now: options.now }),
+      ...(options.isBusy === undefined ? {} : { isBusy: options.isBusy }),
     }),
   };
 }
@@ -74,6 +77,17 @@ describe("binding a child to a conversation", () => {
     expect(second).toBe(first);
     expect(p.stats().children).toBe(1);
     expect(agent.transcript(first.native.sessionId ?? "")?.turns).toEqual([]);
+  });
+
+  it("resumes the persisted native handle when reopening a cold conversation", async () => {
+    const { pool: p, agent } = pool();
+    const first = await p.acquire(request());
+    const native = { ...first.native };
+    await p.release(cid(0));
+    const resumed = await p.acquire(request({ native }));
+    expect(resumed.native).toEqual(native);
+    expect(agent.transcript(native.sessionId ?? "")).toBeDefined();
+    await p.close();
   });
 
   it("gives each conversation its own child", async () => {
@@ -232,7 +246,8 @@ describe("crashes", () => {
     }
     const second = await p.acquire(request());
     expect(second).not.toBe(first);
-    expect(p.stats().degraded).toEqual([]);
+    // A respawn does not erase the recent failure history.
+    expect(p.stats().degraded).toEqual([cid(0)]);
   });
 });
 
@@ -366,10 +381,17 @@ describe("a child that will not close", () => {
       probe: () => agent.probe(),
       open: async (openOptions) => {
         const session = await agent.open(openOptions);
+        let alive = true;
         return {
           ...session,
+          get isAlive() {
+            return alive;
+          },
           abort: () => session.abort(),
-          close: () => Promise.reject(new Error("the child is already gone")),
+          close: () => {
+            alive = false;
+            return Promise.reject(new Error("the child is already gone"));
+          },
         } as unknown as AgentSession;
       },
     };
@@ -503,5 +525,659 @@ describe("session typing", () => {
     const { pool: p } = pool();
     const session: AgentSession | undefined = p.session(cid(0));
     expect(session).toBeUndefined();
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
+function trackedBackend() {
+  const agent = createFakeAgent({ tickMs: 0 });
+  const sessions: AgentSession[] = [];
+  let live = 0;
+  let peak = 0;
+  const open = vi.fn(async (options: OpenOptions) => {
+    const session = await agent.open(options);
+    sessions.push(session);
+    live += 1;
+    peak = Math.max(peak, live);
+    const close = session.close.bind(session);
+    let closed = false;
+    session.close = vi.fn(async () => {
+      await close();
+      if (!closed) {
+        closed = true;
+        live -= 1;
+      }
+    });
+    return session;
+  });
+  return {
+    agent,
+    sessions,
+    open,
+    backend: { ...withCapabilities(agent, {}), open },
+    get peak() {
+      return peak;
+    },
+    get live() {
+      return live;
+    },
+  };
+}
+
+const singleChild = config({
+  pool: { maxChildren: 1, idleMinutes: 1, spare: true },
+});
+
+describe("pool lifecycle regressions", () => {
+  it("acquire adopts a fresh matching spare and applies the requested settings", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: config() });
+    const fresh = request();
+    p.warmSpare(fresh.root, fresh.env);
+    const session = await p.acquire(
+      request({
+        title: "new title",
+        model: { provider: "fake", id: "fake-slow" },
+        thinking: "high",
+      }),
+    );
+    expect(tracked.open).toHaveBeenCalledTimes(1);
+    expect(session).toBe(tracked.sessions[0]);
+    expect(await session.state()).toMatchObject({
+      name: "new title",
+      model: { provider: "fake", id: "fake-slow" },
+      thinking: "high",
+    });
+    await p.close();
+    expect(tracked.live).toBe(0);
+  });
+
+  it("closes a spare before resuming another native transcript", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    const fresh = request();
+    p.warmSpare(fresh.root, fresh.env);
+    const native = { sessionId: "persisted-native" };
+    const resumed = await p.acquire(request({ native }));
+    expect(resumed.native).toEqual(native);
+    expect(tracked.sessions[0]?.close).toHaveBeenCalledTimes(1);
+    expect(tracked.peak).toBe(1);
+    await p.close();
+    expect(tracked.live).toBe(0);
+  });
+
+  it("closes a configuration-unsuitable spare before opening with spawn persona", async () => {
+    const tracked = trackedBackend();
+    const backend = {
+      ...tracked.backend,
+      capabilities: {
+        ...tracked.backend.capabilities,
+        personasWithoutRespawn: false,
+      },
+    };
+    const p = new AgentPool({ backend, config: singleChild });
+    const fresh = request();
+    p.warmSpare(fresh.root, fresh.env);
+    await p.acquire(request({ persona: { name: "ask", tools: ["read"] } }));
+    expect(tracked.sessions[0]?.close).toHaveBeenCalledTimes(1);
+    expect(tracked.open.mock.calls[1]?.[0].persona).toEqual({
+      name: "ask",
+      tools: ["read"],
+    });
+    expect(tracked.peak).toBe(1);
+    await p.close();
+  });
+
+  it("does not warm a spare when all child slots are occupied", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    await p.acquire(request());
+    p.warmSpare(ROOT, {});
+    await p.sweepIdle();
+    expect(tracked.open).toHaveBeenCalledTimes(1);
+    expect(p.stats().spare).toBe(0);
+    expect(tracked.peak).toBe(1);
+    await p.close();
+  });
+
+  it("rejects capacity requests while every child is active", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({
+      backend: tracked.backend,
+      config: singleChild,
+      isBusy: (id) => id === cid(0),
+    });
+    const first = await p.acquire(request());
+    await expect(
+      p.acquire(request({ conversationId: cid(1) })),
+    ).rejects.toMatchObject({ code: "CONVERSATION_BUSY" });
+    expect(p.session(cid(0))).toBe(first);
+    expect(first.close).not.toHaveBeenCalled();
+    await p.close();
+  });
+
+  it("evicts an idle child while protecting the older active child", async () => {
+    const { pool: p } = pool({
+      config: config({
+        pool: { maxChildren: 2, idleMinutes: 1, spare: false },
+      }),
+      isBusy: (id) => id === cid(0),
+    });
+    const active = await p.acquire(request());
+    await p.acquire(request({ conversationId: cid(1) }));
+    await p.acquire(request({ conversationId: cid(2) }));
+    expect(p.session(cid(0))).toBe(active);
+    expect(p.session(cid(1))).toBeUndefined();
+    await p.close();
+  });
+
+  it("sweeps only expired idle children and expired spares", async () => {
+    let now = 1_000;
+    const { pool: p } = pool({
+      now: () => now,
+      config: config({ pool: { maxChildren: 3, idleMinutes: 1, spare: true } }),
+      isBusy: (id) => id === cid(0),
+    });
+    await p.acquire(request());
+    await p.acquire(request({ conversationId: cid(1) }));
+    p.warmSpare(ROOT, {});
+    await p.sweepIdle();
+    expect(p.stats().spare).toBe(1);
+    now += 61_000;
+    expect(await p.sweepIdle()).toEqual([cid(1)]);
+    expect(p.session(cid(0))).toBeDefined();
+    expect(p.stats().spare).toBe(0);
+    await p.close();
+  });
+
+  it("reopens an exited child on the same native session", async () => {
+    const { pool: p } = pool();
+    const first = await p.acquire(request());
+    await first.close();
+    const resumed = await p.acquire(request());
+    expect(resumed).not.toBe(first);
+    expect(resumed.native).toEqual(first.native);
+    await p.close();
+  });
+
+  it("preserves recent crash counts across transport respawns", async () => {
+    const { pool: p } = pool();
+    for (let i = 0; i < 3; i += 1) {
+      const session = await p.acquire(request());
+      await session.close();
+    }
+    await p.acquire(request());
+    expect(p.stats().degraded).toEqual([cid(0)]);
+    await p.close();
+  });
+
+  it("serializes concurrent opens so they never exceed the child limit", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    await Promise.all([
+      p.acquire(request()),
+      p.acquire(request({ conversationId: cid(1) })),
+      p.acquire(request({ conversationId: cid(2) })),
+    ]);
+    expect(tracked.peak).toBe(1);
+    expect(p.stats().children).toBe(1);
+    await p.close();
+    expect(tracked.live).toBe(0);
+  });
+
+  it("opens once when concurrent callers acquire the same conversation", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: config() });
+    const [first, second] = await Promise.all([
+      p.acquire(request()),
+      p.acquire(request()),
+    ]);
+    expect(first).toBe(second);
+    expect(tracked.open).toHaveBeenCalledTimes(1);
+    await p.close();
+    expect(tracked.live).toBe(0);
+  });
+
+  it("closes before respawning rather than briefly exceeding capacity", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    await p.acquire(request());
+    await p.acquire(request({ root: "/other" }));
+    expect(tracked.peak).toBe(1);
+    await p.close();
+  });
+
+  it("retains a closing child's slot until closure completes", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    const session = await p.acquire(request());
+    const gate = deferred<void>();
+    const entered = deferred<void>();
+    const close = session.close.bind(session);
+    session.close = vi.fn(async () => {
+      entered.resolve();
+      await gate.promise;
+      await close();
+    });
+    const released = p.release(cid(0));
+    await entered.promise;
+    expect(p.stats().children).toBe(1);
+    const acquired = p.acquire(request({ conversationId: cid(1) }));
+    expect(tracked.open).toHaveBeenCalledTimes(1);
+    gate.resolve();
+    await released;
+    await acquired;
+    expect(tracked.peak).toBe(1);
+    await p.close();
+  });
+
+  it("shutdown closes a child whose open completes after shutdown began", async () => {
+    const tracked = trackedBackend();
+    const gate = deferred<void>();
+    const entered = deferred<void>();
+    const backend = {
+      ...tracked.backend,
+      open: async (options: OpenOptions) => {
+        entered.resolve();
+        await gate.promise;
+        return tracked.open(options);
+      },
+    };
+    const p = new AgentPool({ backend, config: singleChild });
+    const acquiring = p.acquire(request());
+    const failed = expect(acquiring).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+    await entered.promise;
+    const closing = p.close();
+    gate.resolve();
+    await failed;
+    await closing;
+    expect(tracked.live).toBe(0);
+    expect(p.stats()).toMatchObject({ children: 0, spare: 0 });
+    await p.close();
+    expect(tracked.sessions[0]?.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("pool closure and recovery ownership", () => {
+  it("retains a live child after rejected closure and retries shutdown after confirmed exit", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    const session = await p.acquire(request());
+    const actuallyClose = session.close.bind(session);
+    session.close = vi.fn(() => Promise.reject(new Error("close failed")));
+    await expect(p.release(cid(0))).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+    expect(p.session(cid(0))).toBe(session);
+    expect(p.stats().children).toBe(1);
+    await expect(
+      p.acquire(request({ conversationId: cid(1) })),
+    ).rejects.toMatchObject({ code: "AGENT_UNAVAILABLE" });
+    expect(tracked.open).toHaveBeenCalledTimes(1);
+    await expect(p.close()).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+    await actuallyClose();
+    await p.close();
+    expect(p.stats().children).toBe(0);
+  });
+
+  it("retains a child when close resolves but the backend still reports it alive", async () => {
+    const { pool: p } = pool();
+    const session = await p.acquire(request());
+    const actuallyClose = session.close.bind(session);
+    session.close = vi.fn(async () => {});
+    await expect(p.release(cid(0))).rejects.toThrow(
+      "still alive after closing",
+    );
+    expect(p.stats().children).toBe(1);
+    await actuallyClose();
+    await p.close();
+    expect(p.stats().children).toBe(0);
+  });
+
+  it("retains a live failed-close spare without opening a replacement", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    const fresh = request();
+    p.warmSpare(fresh.root, fresh.env);
+    await p.sweepIdle();
+    const session = tracked.sessions[0]!;
+    const actuallyClose = session.close.bind(session);
+    session.close = vi.fn(() => Promise.reject(new Error("spare stays alive")));
+    await expect(p.acquire(request({ root: "/other" }))).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+    expect(p.stats().spare).toBe(1);
+    expect(tracked.open).toHaveBeenCalledTimes(1);
+    await expect(p.close()).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+    await actuallyClose();
+    await p.close();
+    expect(p.stats().spare).toBe(0);
+  });
+
+  it("closes a spare whose requested settings fail without reusing its partial configuration", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    const fresh = request();
+    p.warmSpare(fresh.root, fresh.env);
+    await expect(
+      p.acquire(
+        request({
+          title: "partial",
+          model: { provider: "fake", id: "not-a-model" },
+        }),
+      ),
+    ).rejects.toThrow("no model");
+    expect(p.stats().spare).toBe(0);
+    expect(tracked.live).toBe(0);
+    const session = await p.acquire(request());
+    expect((await session.state()).name).not.toBe("partial");
+    await p.close();
+  });
+
+  it("closes a spare that cannot apply the requested title before opening with that title", async () => {
+    const tracked = trackedBackend();
+    const backend = {
+      ...tracked.backend,
+      open: async (options: OpenOptions) => {
+        const session = await tracked.open(options);
+        Object.defineProperty(session, "rename", { value: undefined });
+        return session;
+      },
+    };
+    const p = new AgentPool({ backend, config: singleChild });
+    const fresh = request();
+    p.warmSpare(fresh.root, fresh.env);
+    const session = await p.acquire(request({ title: "fresh title" }));
+    expect((await session.state()).name).toBe("fresh title");
+    expect(tracked.sessions[0]?.close).toHaveBeenCalledTimes(1);
+    expect(tracked.peak).toBe(1);
+    await p.close();
+  });
+
+  it("retains the native handle across failed replacement startup", async () => {
+    const tracked = trackedBackend();
+    let fail = false;
+    const backend = {
+      ...tracked.backend,
+      open: async (options: OpenOptions) => {
+        if (fail) throw new Error("startup failed");
+        return tracked.open(options);
+      },
+    };
+    const p = new AgentPool({ backend, config: singleChild });
+    const first = await p.acquire(request());
+    fail = true;
+    await expect(p.acquire(request({ root: "/other" }))).rejects.toThrow(
+      "startup failed",
+    );
+    expect(p.stats().children).toBe(0);
+    expect(p.session(cid(0))).toBeUndefined();
+    fail = false;
+    const resumed = await p.acquire(request({ root: "/other" }));
+    expect(resumed.native).toEqual(first.native);
+    await p.close();
+  });
+
+  it("closes a late-ready spare during concurrent shutdown and closes it only once", async () => {
+    const tracked = trackedBackend();
+    const gate = deferred<void>();
+    const entered = deferred<void>();
+    const backend = {
+      ...tracked.backend,
+      open: async (options: OpenOptions) => {
+        entered.resolve();
+        await gate.promise;
+        return tracked.open(options);
+      },
+    };
+    const p = new AgentPool({ backend, config: singleChild });
+    p.warmSpare(ROOT, {});
+    await entered.promise;
+    expect(p.stats().spare).toBe(1);
+    const first = p.close();
+    const second = p.close();
+    expect(second).toBe(first);
+    gate.resolve();
+    await Promise.all([first, second]);
+    expect(tracked.sessions[0]?.close).toHaveBeenCalledTimes(1);
+    expect(tracked.live).toBe(0);
+    await expect(p.acquire(request())).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+    p.warmSpare(ROOT, {});
+    expect(p.stats().spare).toBe(0);
+  });
+
+  it("does not overwrite an existing binding when explicitly taking a spare", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: config() });
+    const first = await p.acquire(request());
+    const fresh = request();
+    p.warmSpare(fresh.root, fresh.env);
+    await p.takeSpare(cid(0), fresh.root, fresh.env);
+    expect(p.session(cid(0))).toBe(first);
+    expect(p.stats().spare).toBe(1);
+    await p.close();
+    expect(tracked.live).toBe(0);
+  });
+
+  it("does not double-count a crash already reported by the turn manager", async () => {
+    const { pool: p } = pool();
+    const first = await p.acquire(request());
+    await first.close();
+    expect(p.noteCrash(cid(0)).recent).toBe(1);
+    await p.acquire(request());
+    expect(p.noteCrash(cid(0)).recent).toBe(2);
+    await p.close();
+  });
+
+  it("updates a persona whose tools changed while its name stayed the same", async () => {
+    const { pool: p } = pool();
+    const first = await p.acquire(
+      request({ persona: { name: "custom", tools: ["read"] } }),
+    );
+    const second = await p.acquire(
+      request({ persona: { name: "custom", tools: ["read", "write"] } }),
+    );
+    expect(second).toBe(first);
+    expect(
+      (second as { persona?: { tools: string[] } }).persona?.tools,
+    ).toEqual(["read", "write"]);
+    await p.close();
+  });
+
+  it("rejects an advertised live persona switch without the matching method", async () => {
+    const { pool: p } = pool();
+    const session = await p.acquire(request());
+    Object.defineProperty(session, "setPersona", { value: undefined });
+    await expect(
+      p.acquire(request({ persona: { name: "ask" } })),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED" });
+    await p.close();
+  });
+
+  it("treats zero expiry as immediate for idle children while preserving busy work", async () => {
+    const { pool: p } = pool({
+      config: config({
+        pool: { maxChildren: 2, idleMinutes: 0, spare: false },
+      }),
+      isBusy: (id) => id === cid(0),
+    });
+    await p.acquire(request());
+    await p.acquire(request({ conversationId: cid(1) }));
+    expect(await p.sweepIdle()).toEqual([cid(1)]);
+    expect(p.session(cid(0))).toBeDefined();
+    await p.close();
+  });
+});
+
+describe("spare lifecycle boundaries", () => {
+  it("keeps one matching spare and replaces it safely for a different environment", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    expect(p.backend).toBe(tracked.backend);
+    p.warmSpare(ROOT, {});
+    p.warmSpare(ROOT, {});
+    await p.sweepIdle();
+    expect(tracked.open).toHaveBeenCalledTimes(1);
+    p.warmSpare(ROOT, { PATH: "/different" });
+    await p.sweepIdle();
+    expect(tracked.open).toHaveBeenCalledTimes(2);
+    expect(tracked.sessions[0]?.close).toHaveBeenCalledTimes(1);
+    p.warmSpare("/other", { PATH: "/different" });
+    await p.sweepIdle();
+    expect(tracked.open).toHaveBeenCalledTimes(3);
+    expect(tracked.peak).toBe(1);
+    await p.close();
+    expect(tracked.live).toBe(0);
+  });
+
+  it("does not adopt a spare whose transport has exited", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    const fresh = request();
+    p.warmSpare(fresh.root, fresh.env);
+    await p.sweepIdle();
+    await tracked.sessions[0]!.close();
+    const session = await p.acquire(request({ native: {} }));
+    expect(session).not.toBe(tracked.sessions[0]);
+    expect(tracked.peak).toBe(1);
+    await p.close();
+    expect(tracked.live).toBe(0);
+  });
+
+  it.each(["setThinking", "setPersona"] as const)(
+    "reopens a spare missing %s with the full requested settings",
+    async (method) => {
+      const tracked = trackedBackend();
+      const backend = {
+        ...tracked.backend,
+        open: async (options: OpenOptions) => {
+          const session = await tracked.open(options);
+          Object.defineProperty(session, method, { value: undefined });
+          return session;
+        },
+      };
+      const p = new AgentPool({ backend, config: singleChild });
+      const fresh = request();
+      p.warmSpare(fresh.root, fresh.env);
+      const settings =
+        method === "setThinking"
+          ? { thinking: "high" }
+          : { persona: { name: "ask" } };
+      await p.acquire(request(settings));
+      expect(tracked.open.mock.calls[1]?.[0]).toMatchObject(settings);
+      expect(tracked.sessions[0]?.close).toHaveBeenCalledTimes(1);
+      expect(tracked.peak).toBe(1);
+      await p.close();
+    },
+  );
+
+  it("retains a failed-close spare and logs prewarming failure", async () => {
+    const tracked = trackedBackend();
+    const log = vi.fn();
+    const p = new AgentPool({
+      backend: tracked.backend,
+      config: singleChild,
+      log,
+    });
+    p.warmSpare(ROOT, {});
+    await p.sweepIdle();
+    const spare = tracked.sessions[0]!;
+    const actuallyClose = spare.close.bind(spare);
+    spare.close = vi.fn(() => Promise.reject(new Error("still alive")));
+    p.warmSpare("/other", {});
+    await p.sweepIdle();
+    expect(log).toHaveBeenCalledWith("could not pre-warm a spare agent child", {
+      cause: "agent child could not be closed",
+    });
+    expect(p.stats().spare).toBe(1);
+    expect(tracked.open).toHaveBeenCalledTimes(1);
+    await actuallyClose();
+    await p.close();
+  });
+
+  it("does not start queued prewarming once shutdown begins", async () => {
+    const tracked = trackedBackend();
+    const gate = deferred<void>();
+    const entered = deferred<void>();
+    const backend = {
+      ...tracked.backend,
+      open: async (options: OpenOptions) => {
+        entered.resolve();
+        await gate.promise;
+        return tracked.open(options);
+      },
+    };
+    const p = new AgentPool({ backend, config: config() });
+    const acquiring = p.acquire(request());
+    const failed = expect(acquiring).rejects.toMatchObject({
+      code: "AGENT_UNAVAILABLE",
+    });
+    await entered.promise;
+    expect(p.stats().children).toBe(1);
+    p.warmSpare(ROOT, {});
+    const closing = p.close();
+    gate.resolve();
+    await failed;
+    await closing;
+    expect(tracked.open).toHaveBeenCalledTimes(1);
+    expect(tracked.live).toBe(0);
+  });
+
+  it("honors the spare option override without changing the supplied configuration", async () => {
+    const tracked = trackedBackend();
+    const options = config();
+    const p = new AgentPool({
+      backend: tracked.backend,
+      config: options,
+      spare: false,
+    });
+    p.warmSpare(ROOT, {});
+    await p.close();
+    expect(tracked.open).not.toHaveBeenCalled();
+    expect(options.pool.spare).toBe(true);
+  });
+
+  it("preserves ownership if a nonfinite idle interval reaches the pool", async () => {
+    const { pool: p } = pool({
+      config: config({
+        pool: { maxChildren: 2, idleMinutes: Number.NaN, spare: false },
+      }),
+    });
+    const session = await p.acquire(request());
+    expect(await p.sweepIdle()).toEqual([]);
+    expect(p.session(cid(0))).toBe(session);
+    await p.close();
+  });
+});
+
+describe("persona spare restrictions", () => {
+  it("cold-opens persona-bearing requests even when the backend advertises live switching", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({ backend: tracked.backend, config: singleChild });
+    const fresh = request();
+    p.warmSpare(fresh.root, fresh.env);
+    const persona = { name: "ask", tools: ["read"] };
+    const session = await p.acquire(request({ persona }));
+    expect(tracked.open).toHaveBeenCalledTimes(2);
+    expect(tracked.open.mock.calls[1]?.[0].persona).toEqual(persona);
+    expect(tracked.sessions[0]?.close).toHaveBeenCalledTimes(1);
+    expect(session).not.toBe(tracked.sessions[0]);
+    expect(tracked.peak).toBe(1);
+    await p.close();
   });
 });

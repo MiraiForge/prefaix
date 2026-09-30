@@ -283,6 +283,7 @@ export interface TtyOptions {
  */
 export class TtyController {
   readonly #input: RawModeTarget | undefined;
+  readonly #initialRaw: boolean;
   readonly #decoder: KeyDecoder;
   readonly #onResize: ((cols: number, rows: number) => void) | undefined;
   readonly #winch: (() => void) | undefined;
@@ -293,6 +294,7 @@ export class TtyController {
 
   constructor(options: TtyOptions) {
     this.#input = options.input ?? defaultInput();
+    this.#initialRaw = this.#input?.isRaw === true;
     this.#decoder = new KeyDecoder({
       onKey: options.onKey,
       onEsc: options.onEsc,
@@ -370,7 +372,7 @@ export class TtyController {
     this.#decoder.flush();
     if (this.#raw) {
       try {
-        this.#input?.setRawMode(false);
+        this.#input?.setRawMode(this.#initialRaw);
       } catch {
         // The terminal is already gone, which is the state being restored to.
       }

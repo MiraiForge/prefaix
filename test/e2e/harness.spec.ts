@@ -4,32 +4,15 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  SHELL_KINDS,
+  TEST_SHELLS,
   ShellSession,
   ensureSpawnHelper,
-  probeShell,
   type ShellKind,
-  type ShellAvailability,
 } from "./harness.js";
 
 const open: ShellSession[] = [];
 
-// Probed once: a shell that cannot be driven here is skipped everywhere with
-// the reason, rather than failing every gate for an environment fact.
-const availability: ShellAvailability[] = await Promise.all(
-  SHELL_KINDS.map((shell) => probeShell(shell)),
-);
-// The shells the gates are written against. fish is out for now: it repaints
-// in place rather than scrolling, so "the rows between the command and its
-// completion token" is not a stable notion there, and it cannot be reproduced
-// on a workstation where fish will not start in a pty at all. Tracked as its
-// own work rather than left to fail here.
-const GATED: readonly ShellKind[] = ["zsh", "bash"];
-const usable = GATED.filter(
-  (shell) =>
-    availability.find((entry) => entry.shell === shell)?.available === true,
-);
-const unusable = availability.filter((entry) => !entry.available);
+const usable = TEST_SHELLS;
 
 async function session(
   shell: ShellKind,
@@ -47,28 +30,6 @@ afterEach(async () => {
 });
 
 describe("pty harness", () => {
-  it("reports which shells this machine can drive", () => {
-    // Printed rather than asserted, so a run that skips fish says why.
-    for (const entry of availability) {
-      console.log(
-        `  e2e shell ${entry.shell}: ${entry.available ? "available" : `unavailable — ${entry.reason ?? "unknown"}`}`,
-      );
-    }
-    expect(usable.length).toBeGreaterThan(0);
-  });
-
-  it("notes when prefaix's default shell cannot be driven here", () => {
-    // Not an assertion: CI installs the shells DESIGN 12.5 lists, and a runner
-    // that could not install them should say so rather than fail here.
-    if (!usable.includes("zsh")) {
-      console.log(
-        "  note: zsh is unavailable, so no zsh gate ran. DESIGN 12.5 has CI " +
-          "install it.",
-      );
-    }
-    expect(usable.length).toBeGreaterThan(0);
-  });
-
   it("makes node-pty's prebuilt helper executable", () => {
     // The bit is missing from the published tarball; without it every spawn
     // fails with a bare "posix_spawnp failed".
@@ -83,10 +44,45 @@ describe("pty harness", () => {
   });
 
   it.each(usable)(
+    "reaps %s before teardown returns even when SIGHUP is ignored",
+    async (shell) => {
+      const s = await session(shell);
+      const pid = Number(
+        await s.run(shell === "fish" ? "echo $fish_pid" : "echo $$"),
+      );
+      expect(pid).toBeGreaterThan(1);
+      await s.run("trap '' HUP");
+      try {
+        await s.close();
+        expect(() => process.kill(pid, 0)).toThrow();
+      } finally {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // A successful teardown already reaped this test-owned shell.
+        }
+      }
+    },
+  );
+
+  it.each(usable)(
     "reads a command's output off the %s screen",
     async (shell) => {
       const s = await session(shell);
       expect(await s.run("echo harness-works")).toBe("harness-works");
+    },
+  );
+
+  it.each(usable)(
+    "separates %s multiline input echo from command output",
+    async (shell) => {
+      const s = await ShellSession.start({ shell, cols: 40 });
+      open.push(s);
+      expect(await s.run("printf '%s\\n' \\\n'harness-output'")).toBe(
+        "harness-output",
+      );
+      await s.run(shell === "fish" ? "set -g pfx_var hello" : "pfx_var=hello");
+      expect(await s.readVariable("pfx_var")).toBe("hello");
     },
   );
 
@@ -109,7 +105,9 @@ describe("pty harness", () => {
     expect(await s.status("true")).toBe(0);
     expect(await s.status("false")).toBe(1);
     // A subshell, because a bare `exit 42` would end the interactive shell.
-    expect(await s.status("(exit 42)")).toBe(42);
+    expect(
+      await s.status(shell === "fish" ? "sh -c 'exit 42'" : "(exit 42)"),
+    ).toBe(42);
     // And the shell is still usable afterwards.
     expect(await s.run("echo alive")).toBe("alive");
   });
@@ -129,7 +127,9 @@ describe("pty harness", () => {
       // The e2e gate that a prompt with awkward characters arrives intact.
       const s = await session(shell);
       expect(await s.run("echo 'a b'  \"c d\"")).toBe("a b c d");
-      expect(await s.run("echo $((2 + 3))")).toBe("5");
+      expect(
+        await s.run(shell === "fish" ? "math 2 + 3" : "echo $((2 + 3))"),
+      ).toBe("5");
       expect(await s.run('echo "pre$(echo mid)post"')).toBe("premidpost");
     },
   );
@@ -176,16 +176,6 @@ describe("pty harness", () => {
     },
   );
 
-  it("skips nothing silently", () => {
-    // Every shell is either driven or has a recorded reason.
-    for (const entry of unusable) {
-      expect(
-        entry.reason,
-        `${entry.shell} must say why it is skipped`,
-      ).toBeTruthy();
-    }
-  });
-
   it("reports a timeout with the screen that caused it", async () => {
     // Whichever shell this machine can drive, since the point is the timeout.
     const s = await session(usable[0] ?? "bash");
@@ -208,7 +198,10 @@ describe("pty harness", () => {
   it.each(usable)(
     "runs a startup script in %s, which is where a plugin would load",
     async (shell) => {
-      const s = await session(shell, { initScript: "pfx_loaded=yes" });
+      const s = await session(shell, {
+        initScript:
+          shell === "fish" ? "set -g pfx_loaded yes" : "pfx_loaded=yes",
+      });
       expect(await s.readVariable("pfx_loaded")).toBe("yes");
     },
   );

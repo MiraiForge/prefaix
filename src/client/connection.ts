@@ -5,7 +5,6 @@
 // `core/`, which is why the daemon and the adapters stay out of a `prefaix run`
 // cold start (DESIGN §4.2, §9).
 
-import { spawn } from "node:child_process";
 import { connect, type Socket } from "node:net";
 import { PrefaixError } from "../core/errors.js";
 import {
@@ -68,6 +67,7 @@ export function isConnectRefused(cause: unknown): boolean {
 export function defaultSpawnDaemon(entry: string, paths: PrefaixPaths): void {
   // Detached with its own session, stdio to the log, and unref'd, so the client
   // can exit while the daemon keeps running (DESIGN §4.3.1).
+  const { spawn } = process.getBuiltinModule("child_process");
   const log = spawn(entry, ["daemon"], {
     detached: true,
     stdio: ["ignore", "ignore", "ignore"],
@@ -97,6 +97,7 @@ export class DaemonClient {
   readonly #endListeners = new Set<
     (turnId: string, summary: TurnSummary) => void
   >();
+  #onClose: ((error: PrefaixError) => void) | undefined;
   #onEvent: ((turnId: string, event: TurnEvent) => void) | undefined;
   #onEnd: ((turnId: string, summary: TurnSummary) => void) | undefined;
   #awaitingHello:
@@ -108,6 +109,10 @@ export class DaemonClient {
 
   constructor(options: ClientOptions) {
     this.#options = options;
+  }
+
+  onClose(listener: (error: PrefaixError) => void): void {
+    this.#onClose = listener;
   }
 
   onEvent(listener: (turnId: string, event: TurnEvent) => void): void {
@@ -293,6 +298,7 @@ export class DaemonClient {
       "the prefaix daemon closed the connection",
       { hint: "The next `:` starts a new daemon." },
     );
+    this.#onClose?.(error);
     this.#awaitingHello?.reject(error);
     for (const [, pending] of this.#pending) {
       pending.reject(error);

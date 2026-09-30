@@ -7,15 +7,13 @@
 // knows "prefaix, configured this way" never learns which backend it got.
 
 import { PrefaixError } from "../core/errors.js";
-import type { AgentBackend } from "../core/agent-port.js";
+import type { AgentBackend, Capabilities } from "../core/agent-port.js";
 import type { BackendId, PrefaixConfig } from "../core/config/index.js";
-import {
-  FAKE_ID,
-  createFakeAgent,
-  type FakeAgentOptions,
-} from "./fake/adapter.js";
-import { SCENARIO_NAMES } from "./fake/scenarios.js";
-import { PI_ID, createPiAdapter, type PiAdapterOptions } from "./pi/adapter.js";
+import type { FakeAgentOptions } from "./fake/adapter.js";
+import type { PiAdapterOptions } from "./pi/adapter.js";
+import { FAKE_ID, FAKE_CAPABILITIES } from "./fake/capabilities.js";
+import { PI_ID, piCapabilities } from "./pi/capabilities.js";
+import { SCENARIO_NAMES } from "./fake/scenario-names.js";
 import { resolveBridgeBundle } from "./pi/bridge-bundle.js";
 
 export interface BackendOptions {
@@ -24,15 +22,32 @@ export interface BackendOptions {
   readonly pi?: PiAdapterOptions;
 }
 
-type BackendFactory = (options: BackendOptions) => AgentBackend;
+interface BackendFactory {
+  capabilities(options: BackendOptions): Capabilities;
+  load(options: BackendOptions): Promise<AgentBackend>;
+}
 
 const FACTORIES: Readonly<Record<string, BackendFactory>> = {
-  [FAKE_ID]: (options) =>
-    createFakeAgent({
-      ...options.fake,
-      ...(options.env === undefined ? {} : { env: options.env }),
+  [FAKE_ID]: {
+    capabilities: (options) => ({
+      ...FAKE_CAPABILITIES,
+      ...options.fake?.capabilities,
     }),
-  [PI_ID]: (options) => createPiAdapter({ ...options.pi }),
+    load: async (options) => {
+      const { createFakeAgent } = await import("./fake/adapter.js");
+      return createFakeAgent({
+        ...options.fake,
+        ...(options.env === undefined ? {} : { env: options.env }),
+      });
+    },
+  },
+  [PI_ID]: {
+    capabilities: (options) => piCapabilities(options.pi),
+    load: async (options) => {
+      const { createPiAdapter } = await import("./pi/adapter.js");
+      return createPiAdapter({ ...options.pi });
+    },
+  },
 };
 
 export const BACKEND_IDS: readonly BackendId[] = [FAKE_ID, PI_ID];
@@ -55,7 +70,26 @@ export function createBackend(
       },
     );
   }
-  return factory(options);
+  // Capabilities are lightweight metadata. Loading the selected adapter only
+  // on first use leaves the unused backend out of the daemon's idle footprint.
+  const captured =
+    id === FAKE_ID
+      ? {
+          ...options,
+          fake: {
+            ...options.fake,
+            env: options.fake?.env ?? { ...process.env },
+          },
+        }
+      : options;
+  let implementation: Promise<AgentBackend> | undefined;
+  const load = () => (implementation ??= factory.load(captured));
+  return {
+    id,
+    capabilities: factory.capabilities(captured),
+    probe: async () => (await load()).probe(),
+    open: async (opts) => (await load()).open(opts),
+  };
 }
 
 export interface ConfiguredBackendOptions {

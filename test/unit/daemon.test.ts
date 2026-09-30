@@ -7,8 +7,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import * as fsPromises from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Daemon, daemonUnavailable } from "../../src/daemon/daemon.js";
 import { resolvePaths } from "../../src/core/paths.js";
 import { defaultConfig } from "../../src/core/config/schema.js";
@@ -18,6 +19,11 @@ import { isErrorInfo } from "../../src/core/protocol.js";
 import { TestClient } from "../support/client.js";
 import type { PrefaixConfig } from "../../src/core/config/schema.js";
 import type { TurnStartParams } from "../../src/core/protocol.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, appendFile: vi.fn(actual.appendFile) };
+});
 
 let home = "";
 let paths: ReturnType<typeof resolvePaths>;
@@ -99,6 +105,109 @@ afterEach(async () => {
 });
 
 describe("the daemon lifecycle", () => {
+  it("drains pending log writes before completing shutdown", async () => {
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const appending = vi
+      .spyOn(fsPromises, "appendFile")
+      .mockImplementation(async () => {
+        await gate;
+      });
+    const daemon = await startDaemon();
+    let stopped = false;
+    const stopping = daemon.stop().then(() => {
+      stopped = true;
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(appending).toHaveBeenCalled();
+      expect(stopped).toBe(false);
+    } finally {
+      release();
+      await stopping;
+      appending.mockRestore();
+    }
+  });
+
+  it("waits for durable outcomes on every concurrent stop call", async () => {
+    const daemon = await startDaemon({
+      pool: { ...defaultConfig().pool, maxChildren: 1, spare: true },
+    });
+    const client = await connect();
+    let writing = (): void => undefined;
+    const entered = new Promise<void>((resolve) => {
+      writing = resolve;
+    });
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const update = daemon.store.update.bind(daemon.store);
+    vi.spyOn(daemon.store, "update").mockImplementation(async (id, patch) => {
+      if (patch.stats !== undefined) {
+        writing();
+        await gate;
+      }
+      return update(id, patch);
+    });
+    const started = await client.call("turn.start", turnParams());
+    expect(started.ok).toBe(true);
+    await entered;
+    const conversationId = (started.data as { conversationId: string })
+      .conversationId;
+    await expect(
+      daemon.pool.acquire({
+        conversationId: "another-conversation",
+        root: home,
+        env: { PATH: "/usr/bin", HOME: home },
+      }),
+    ).rejects.toMatchObject({ code: "CONVERSATION_BUSY" });
+    expect(daemon.pool.session(conversationId)).toBeDefined();
+    let stopped = false;
+    const stopping = Promise.all([daemon.stop(), daemon.stop()]).then(() => {
+      stopped = true;
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(stopped).toBe(false);
+      expect(statSync(paths.lock).isFile()).toBe(true);
+    } finally {
+      release();
+      await stopping;
+    }
+    expect((await daemon.store.get(conversationId))?.stats.turns).toBe(1);
+    expect(daemon.pool.stats()).toMatchObject({ children: 0, spare: 0 });
+  });
+
+  it("sweeps idle children even while a client remains connected", async () => {
+    let now = 1_000;
+    const daemon = new Daemon({
+      paths,
+      config: config({
+        agent: { ...defaultConfig().agent, backend: "fake" },
+        pool: { maxChildren: 1, idleMinutes: 1, spare: false },
+      }),
+      version: "test",
+      env: { PATH: "/usr/bin", HOME: home },
+      checkOwner: false,
+      now: () => now,
+      idleTickMs: 5,
+    });
+    daemons.push(daemon);
+    await daemon.start();
+    const client = await connect();
+    const started = await client.call("turn.start", turnParams());
+    expect(started.ok).toBe(true);
+    await client.waitFor((message) => message.t === "turn.end");
+    expect(daemon.pool.stats().children).toBe(1);
+    now += 60_001;
+    await vi.waitFor(() => expect(daemon.pool.stats().children).toBe(0));
+    expect(daemon.connections).toBe(1);
+    expect((await client.call("daemon.ping", {})).ok).toBe(true);
+  });
+
   it("listens on a 0600 socket in a 0700 runtime dir", async () => {
     await startDaemon();
     expect(statSync(paths.runtimeDir).mode & 0o777).toBe(0o700);
@@ -514,6 +623,32 @@ describe("the event ring", () => {
 });
 
 describe("the last-turn history", () => {
+  it("automatically bounds retained rings without dropping active turns", () => {
+    const turns = new TurnManager({ retainedTurns: 1 });
+    const active = turns.start({ conversationId: "active", shellId: "a" });
+    for (const conversationId of ["old", "new"]) {
+      const turn = turns.start({ conversationId, shellId: "b" });
+      turns.finish(turn, { turnId: turn.id, status: "stop" });
+    }
+    expect(turns.lastFor("old")).toBeUndefined();
+    expect(turns.lastFor("new")).toBeDefined();
+    expect(turns.runningFor("active")).toBe(active);
+  });
+
+  it("counts disconnected work until its finalization finishes", () => {
+    const turns = new TurnManager();
+    const turn = turns.start({
+      conversationId: "active",
+      shellId: "a",
+      onDisconnect: "continue",
+    });
+    turns.release(turn, "close");
+    expect(turns.count).toBe(1);
+    expect(turns.active).toEqual([turn]);
+    turns.finish(turn, { turnId: turn.id, status: "stop" });
+    expect(turns.count).toBe(0);
+  });
+
   it("keeps the newest and drops the oldest", () => {
     const turns = new TurnManager();
     for (let index = 0; index < 3; index += 1) {

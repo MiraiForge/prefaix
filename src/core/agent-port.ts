@@ -105,6 +105,8 @@ export interface OpenOptions {
 
 export interface AgentSession {
   readonly native: NativeRef;
+  /** Local transport liveness; reading it must never send a model request. */
+  readonly isAlive?: boolean;
   prompt(input: PromptInput, signal: AbortSignal): AsyncIterable<AgentEvent>;
   steer?(text: string): Promise<void>;
   abort(): Promise<void>;
@@ -112,6 +114,7 @@ export interface AgentSession {
   state(): Promise<AgentState>;
   listModels(): Promise<ModelInfo[]>;
   setModel(ref: ModelRef): Promise<void>;
+  listThinkingLevels?(): Promise<string[]>;
   setThinking?(level: string): Promise<void>;
   listCommands?(): Promise<AgentCommand[]>; // skills, templates, extension commands
   compact?(focus?: string): Promise<CompactResult>;

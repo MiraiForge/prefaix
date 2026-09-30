@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { main, USAGE } from "../../src/cli/index.js";
 import {
   runDaemon,
@@ -195,7 +195,7 @@ describe("prefaix config", () => {
 describe("prefaix daemon", () => {
   it("starts in the foreground and stops when asked", async () => {
     const promise = runDaemon(["--foreground"], io());
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await vi.waitFor(() => expect(err.join("")).toContain("listening on"));
     expect(out.join("")).toBe("");
     expect(err.join("")).toContain("listening on");
     daemon = undefined;

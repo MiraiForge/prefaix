@@ -173,6 +173,9 @@ describe("what happens when the client goes away", () => {
     const turn = manager.start(options);
     expect(manager.release(turn, "close")).toBe(true);
     expect(turn.controller.signal.aborted).toBe(true);
+    // Requesting abort does not finish the stream or its durable outcome.
+    expect(manager.count).toBe(1);
+    manager.finish(turn, { turnId: turn.id, status: "aborted" });
     expect(manager.count).toBe(0);
   });
 

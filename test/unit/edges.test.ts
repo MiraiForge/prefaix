@@ -342,18 +342,12 @@ describe("commands the client has not implemented yet", () => {
     });
   }
 
-  it("names every MVP command that has not landed", async () => {
+  it("explains commands that need an active conversation", async () => {
     await startDaemon();
-    for (const command of [
-      ":model",
-      ":conversation",
-      ":copy",
-      ":doctor",
-      ":think",
-    ]) {
+    for (const command of [":model", ":think high", ":copy"]) {
       err = [];
       expect(await runLine(command), command).toBe(EXIT.usage);
-      expect(err.join(""), command).toContain("not available in this build");
+      expect(err.join(""), command).toContain("no active conversation");
     }
   });
 
