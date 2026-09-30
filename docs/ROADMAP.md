@@ -96,12 +96,27 @@ real model streamed thinking and text, settled with `stop`, the bridge was live,
 and reading pi's own session file confirms the `prefaix` section landed beside
 pi's own rather than replacing it, and that the user message was untouched.
 
-One thing is still open, and it is not code:
+The visual check is now two things rather than neither.
 
-- M2-10's "visual check in Ghostty and iTerm2", which is a person's job. bd:
-  `prefaix-hzf`.
+- Ghostty: checked by a person, and it reads correctly.
+- iTerm2: driven as the real rendering target by `bun run test:iterm`, which
+  asserts what the session actually holds — every markdown shape present once,
+  the footer once, no row overwritten, the prompt handed back. It is opt-in
+  (`PREFAIX_ITERM=1`) because a window it opens takes the keyboard from whoever
+  is at the machine, so `bun run test:e2e` skips it and says why.
 
-So M2 is not closed: M2-10 stays open until the visual check is done, which
+Driving iTerm2 earned its keep immediately. It found a sentence whose first
+half never reached the screen: the status line clears its row with a carriage
+return and an erase-line, and it was doing that to the row a half-arrived line
+of answer sat on. The turn carried on, so the text read as if it had begun with
+the link. The defect was in the renderer, not in iTerm2, and it is now covered
+by `test/unit/render-screen.test.ts`, which models one screen with one cursor
+for both streams and needs no terminal to run. See §4.2.1.
+
+What a script cannot judge is colour, and colour is the part of M2-10 that is
+still a person's job. bd: `prefaix-hzf`.
+
+So M2 is not closed: M2-10 stays open until the colour check is done, which
 keeps the epic open with it.
 
 ---
