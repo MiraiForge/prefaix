@@ -113,11 +113,13 @@ the link. The defect was in the renderer, not in iTerm2, and it is now covered
 by `test/unit/render-screen.test.ts`, which models one screen with one cursor
 for both streams and needs no terminal to run. See §4.2.1.
 
-What a script cannot judge is colour, and colour is the part of M2-10 that is
-still a person's job. bd: `prefaix-hzf`.
+Colour is the part a script cannot judge, and it is where this milestone was
+signed off by judgement rather than by a passing run: the inline styles are
+asserted byte for byte in `test/unit/render.test.ts`, and Allan read the result
+in Ghostty.
 
-So M2 is not closed: M2-10 stays open until the colour check is done, which
-keeps the epic open with it.
+M2 is closed. `prefaix-hzf`, `prefaix-0hw.10` and `prefaix-0hw` are closed on
+that basis.
 
 ---
 
