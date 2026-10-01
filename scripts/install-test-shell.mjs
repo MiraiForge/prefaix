@@ -14,19 +14,29 @@ import { join, resolve } from "node:path";
 
 const sources = {
   "bash@4.4": [
-    "https://ftp.gnu.org/gnu/bash/bash-4.4.tar.gz",
+    [
+      "https://mirrors.kernel.org/gnu/bash/bash-4.4.tar.gz",
+      "https://ftp.gnu.org/gnu/bash/bash-4.4.tar.gz",
+    ],
     "d86b3392c1202e8ff5a423b302e6284db7f8f435ea9f39b5b1b20fd3ac36dfcb",
   ],
   "bash@5.2": [
-    "https://ftp.gnu.org/gnu/bash/bash-5.2.tar.gz",
+    [
+      "https://mirrors.kernel.org/gnu/bash/bash-5.2.tar.gz",
+      "https://ftp.gnu.org/gnu/bash/bash-5.2.tar.gz",
+    ],
     "a139c166df7ff4471c5e0733051642ee5556c1cc8a4a78f145583c5c81ab32fb",
   ],
   "fish@3.6.4": [
-    "https://github.com/fish-shell/fish-shell/releases/download/3.6.4/fish-3.6.4.tar.xz",
+    [
+      "https://github.com/fish-shell/fish-shell/releases/download/3.6.4/fish-3.6.4.tar.xz",
+    ],
     "0f3f610e580de092fbe882c8aa76623ecf91bb16fdf0543241e6e90d5d4bc393",
   ],
   "fish@4.0.2": [
-    "https://github.com/fish-shell/fish-shell/releases/download/4.0.2/fish-4.0.2.tar.xz",
+    [
+      "https://github.com/fish-shell/fish-shell/releases/download/4.0.2/fish-4.0.2.tar.xz",
+    ],
     "6e1ecdb164285fc057b2f35acbdc20815c1623099e7bb47bbfc011120adf7e83",
   ],
 };
@@ -62,15 +72,27 @@ function run(bin, args, cwd = work, env = process.env) {
 }
 try {
   const archive = join(work, "source.tar");
-  run("curl", [
-    "--fail",
-    "--location",
-    "--retry",
-    "3",
-    source[0],
-    "--output",
-    archive,
-  ]);
+  for (const [index, url] of source[0].entries()) {
+    try {
+      run("curl", [
+        "--fail",
+        "--location",
+        "--connect-timeout",
+        "15",
+        "--retry",
+        "3",
+        url,
+        "--output",
+        archive,
+      ]);
+      break;
+    } catch (error) {
+      if (index === source[0].length - 1) throw error;
+      console.warn(
+        `Source unavailable at ${url}; trying the next pinned mirror.`,
+      );
+    }
+  }
   const hash = createHash("sha256").update(readFileSync(archive)).digest("hex");
   if (hash !== source[1])
     throw new Error(`Source checksum mismatch for ${shell}@${version}`);
