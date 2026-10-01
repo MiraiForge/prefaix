@@ -155,6 +155,39 @@ for (const shell of TEST_SHELLS)
         calls()[0]?.[calls()[0]!.indexOf("--shell-id") + 1],
       );
     });
+    if (shell === "fish")
+      it("recalls the complete prompt when the external clock advances before fish", async () => {
+        const { s, calls } = await session(
+          shell,
+          `
+function date
+  if set -q __prefaix_history_epoch; and test "$argv[1]" = '+%s'
+    math (command date +%s) + 2
+  else
+    command date $argv
+  end
+end
+`,
+        );
+        expect(await s.run("echo ordinary")).toBe("ordinary");
+        const line = ": synchronized history \\literal\n日本語\n";
+        const row = s.promptRow();
+        s.paste(line);
+        s.press("enter");
+        await expect.poll(calls, { timeout: 8000 }).toHaveLength(1);
+        await s.waitForPrompt({ afterRow: row });
+        expect(calls()[0]?.at(-1)).toBe(line);
+        const editorProbe = "__pfx_reader_ready__";
+        s.send(editorProbe);
+        await s.waitFor(new RegExp(`__pfx ${editorProbe}$`, "u"));
+        s.send("\x7f".repeat(editorProbe.length));
+        await s.waitForPrompt();
+        s.press("up");
+        await s.waitFor(/__pfx : synchronized history/u);
+        s.press("enter");
+        await expect.poll(calls, { timeout: 8000 }).toHaveLength(2);
+        expect(calls()[1]?.at(-1)).toBe(line);
+      });
     it("preserves a bracketed multiline prompt as one argument", async () => {
       const { s, calls } = await session(shell);
       const line = ": hello from multiple lines\nit's $(literal) * ! |\n";

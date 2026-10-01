@@ -16,10 +16,12 @@ builtin passthrough, refresh, vi bindings, and daemon-crash recovery. Fixtures
 exercise directive readers with nonce mismatches and literal shell metacharacters.
 Prompt helpers and ordinary commands must work without a PATH executable.
 Fish 3.6's native history merge only sees new entries after its next whole-second
-boundary. The plugin persists the literal line before streaming and waits for
-that boundary after a short turn before merging, so immediate ↑ recall works.
-This can add up to about one second when returning to the prompt; fish 4.x does
-not use this wait.
+boundary. The plugin persists the literal line before streaming, then merges
+until the latest NUL-framed history entry equals that complete line. This uses
+the existing eleven 100 ms waits after the client has finished; readiness comes
+from fish's history state rather than a separate `date` process. A short fish
+3.x turn can add about one second before returning to the prompt. Fish 4.x
+normally imports the entry on the first merge.
 
 Supported version binaries can be selected with `PREFAIX_E2E_ZSH`,
 `PREFAIX_E2E_FISH`, and `PREFAIX_E2E_BASH`. `PREFAIX_E2E_SHELLS=zsh,fish,bash`
@@ -430,6 +432,30 @@ prompt and all subsequent history/identity assertions are unchanged. Missing
 history remains a failure. This test change requires new exact-head CI and
 frozen local and remote stability sweeps; earlier passing sweeps do not replace
 them.
+
+The preserved `c8f41ec` Ubuntu older-shell repeat 4 still fails this recall
+assertion after the editor marker, proving that input readiness alone does not
+resolve the defect. Its rejected log remains in
+`build/ci-goal-history-final-complete-artifacts/stability-ubuntu-latest-bash4.4-fish3.6.4/run-4.log`.
+Fish 3.x only refreshes its history mapping when its own clock advances beyond
+the merge boundary. A clock-skew fixture that advances external `date` first
+fails three isolated recall attempts with the elapsed-time check, and passes
+all three with the history-state barrier. The permanent regression also fails
+before the correction and passes on fish 3.6.4, 3.7.0 and 4.0.2 afterward,
+recalling and resubmitting a literal multiline prompt with its trailing newline.
+These probes establish the synchronization defect; they do not prove the exact
+clock interleaving in the archived CI failure. All before/after logs remain in
+`build/pty-startup-investigation/history-*-before.log` and
+`build/pty-startup-investigation/history-*-regression-*.log`.
+
+At `3f9eb09`, all six functional and all six versioned performance CI jobs
+pass, and both frozen local sweeps pass 50/50. The macOS newer-shell job fails
+before tests because all four connections to `ftp.gnu.org` time out. Bash
+sources now use the kernel.org mirror with the GNU origin as a transport
+fallback. Both supported archives retain their original SHA256 pins; checksum
+mismatch fails before extraction and does not fall back. The rejected job log
+is `build/pty-startup-investigation/ci-goal-benchmark-final-110237302616.log`.
+New production/test inputs require fresh complete CI and frozen sweeps.
 
 The initial single-character marker was rejected on all three local matrices:
 fish displayed an `x264` autosuggestion after `X`, so the exact screen barrier

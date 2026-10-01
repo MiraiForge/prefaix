@@ -84,6 +84,7 @@ function __prefaix_history --argument-names line
   test -n "$history_name"; or return
   command mkdir -p -- "$data_home/fish"
   builtin history save
+  set -g __prefaix_history_line "$line"
   set -g __prefaix_history_epoch (date +%s)
   set -l when $__prefaix_history_epoch
   if string match -q '3.*' -- "$version"
@@ -93,15 +94,17 @@ function __prefaix_history --argument-names line
 end
 function __prefaix_finish_history
   set -q __prefaix_history_epoch; or return
-  # fish 3.6 ignores same-second merges; 4.x uses subsecond timestamps.
-  # Wait only after the client has finished so first-token latency is unchanged.
-  if string match -q '3.*' -- "$version"
-    for attempt in 1 2 3 4 5 6 7 8 9 10 11
-      test (date +%s) -gt $__prefaix_history_epoch; and break
-      command sleep 0.1
-    end
+  # Merge until the reader can recall this entry. A separate date process can
+  # cross a clock boundary before fish does, so elapsed time is not readiness.
+  # Keep the existing bounded wait after the client has finished.
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11
+    builtin history merge
+    set -l latest ''
+    builtin history search --null --max=1 | read --null latest
+    test "$latest" = "$__prefaix_history_line"; and break
+    command sleep 0.1
   end
-  builtin history merge
+  set -e __prefaix_history_line
   set -e __prefaix_history_epoch
 end
 function __prefaix_accept_line
