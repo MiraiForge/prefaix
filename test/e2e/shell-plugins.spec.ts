@@ -299,10 +299,14 @@ for (const shell of TEST_SHELLS)
       expect(existsSync(counter) ? readFileSync(counter, "utf8") : "").toBe("");
     });
     it("installs Enter interception in vi mode", async () => {
-      const { s, calls } = await session(
+      const { s, calls, home } = await session(
         shell,
         shell === "fish"
-          ? "fish_vi_key_bindings; __prefaix_bind"
+          ? `set -g fish_escape_delay_ms 500
+fish_vi_key_bindings; __prefaix_bind
+function __pfx_test_mode --on-variable fish_bind_mode
+  printf '%s' "$fish_bind_mode" > "$PFX_CALLS.mode"
+end`
           : shell === "zsh"
             ? "bindkey -v; __prefaix_bind"
             : "set -o vi; __prefaix_bind",
@@ -313,8 +317,21 @@ for (const shell of TEST_SHELLS)
       await s.waitForPrompt({ afterRow: row });
       expect(calls()).toHaveLength(1);
       const commandRow = s.promptRow();
+      const modeFile = join(home, "calls.mode");
+      rmSync(modeFile, { force: true });
       s.send(": command mode\x1b");
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (shell === "fish") {
+        // Escape may still be part of an input sequence. Observe its vi mode
+        // transition before Enter, even with a deliberately slow escape delay.
+        await expect
+          .poll(
+            () => (existsSync(modeFile) ? readFileSync(modeFile, "utf8") : ""),
+            { timeout: 8000 },
+          )
+          .toBe("default");
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
       s.press("enter");
       await expect.poll(calls, { timeout: 8000 }).toHaveLength(2);
       await s.waitForPrompt({ afterRow: commandRow });

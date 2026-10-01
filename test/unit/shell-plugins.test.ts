@@ -1,10 +1,24 @@
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultConfig } from "../../src/core/config/schema.js";
 import { resolvePaths } from "../../src/core/paths.js";
 import { initShell, type PluginShell } from "../../src/shells/plugins/index.js";
 
 const shells: PluginShell[] = ["zsh", "fish", "bash"];
+function checkSyntax(shell: PluginShell, script: string) {
+  const directory = mkdtempSync(join(tmpdir(), "pfx-syntax-"));
+  const file = join(directory, `plugin.${shell}`);
+  try {
+    writeFileSync(file, script);
+    // A regular file works with older fish and avoids platform-specific stdin sockets.
+    return spawnSync(shell, ["-n", file], { encoding: "utf8" });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
 describe("embedded shell plugins", () => {
   it.each(shells)(
     "emits syntactically valid %s with safe literal configuration",
@@ -17,10 +31,8 @@ describe("embedded shell plugins", () => {
         paths,
         config: { ...config, grammar: { passthrough: "^: skip(?:me)?\\s*$" } },
       });
-      const checked = spawnSync(shell, ["-n"], {
-        input: script,
-        encoding: "utf8",
-      });
+      const checked = checkSyntax(shell, script);
+      expect(checked.error).toBeUndefined();
       expect(checked.stderr).toBe("");
       expect(checked.status).toBe(0);
       const settings = script.split("\n").slice(0, 5).join("\n");
@@ -32,6 +44,12 @@ describe("embedded shell plugins", () => {
       expect(printed.stdout).toBe(malicious);
     },
   );
+  it.each(shells)("rejects malformed %s plugin source", (shell) => {
+    const checked = checkSyntax(shell, initShell(shell) + '\necho "');
+    expect(checked.error).toBeUndefined();
+    expect(checked.status).not.toBe(0);
+    expect(checked.stderr).not.toBe("");
+  });
   it.each(shells)(
     "embeds %s without runtime file reads or unsafe directives evaluation",
     (shell) => {

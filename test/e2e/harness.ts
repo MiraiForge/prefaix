@@ -661,10 +661,8 @@ export function answerQueries(chunk: string): string[] {
   if (chunk.includes("\u001b[>0q")) {
     replies.push("\u001bP>|prefaix-headless(1.0)\u001b\\");
   }
-  if (chunk.includes("\u001b[?u")) {
-    // Kitty keyboard protocol query: decline the extended form.
-    replies.push("\u001b[?0u");
-  }
+  // No Kitty reply: CSI ? 0 u advertises support with no active flags. This
+  // harness sends legacy key bytes, so fish must detect an unsupported terminal.
   return replies;
 }
 

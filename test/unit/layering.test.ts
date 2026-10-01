@@ -1,12 +1,17 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const eslint = new ESLint({ cwd: root });
 
 describe("architecture import boundaries", () => {
+  beforeAll(async () => {
+    // Load the TypeScript parser and project rules before timing individual cases.
+    await eslint.calculateConfigForFile("src/client/run.ts");
+  });
+
   it.each([
     [
       "client value import",

@@ -269,6 +269,46 @@ meet their local acceptance criteria; the parent `.10` still needs Linux CI
 and required checks on `main`. Git publication and CI acceptance are recorded
 separately in Beads.
 
+## CI synchronization and keyboard capabilities (2026-10-01)
+
+The first pushed native fix passed local stability, but remote CI exposed
+independent test failures tracked in Beads `.10.5`, `.10.6`, and `.10.7`.
+The existing shell-install step now precedes unit validation. Syntax checks
+read regular temporary script files: fish 3.6.4 reproduces the stdin-socket
+failure locally, and its `-n -c` form can return success for malformed source.
+All three shells must accept the generated plugin and reject an appended
+unclosed quote. This verifies the validation path as well as positive syntax.
+
+The architecture suite loads its actual ESLint configuration in `beforeAll`,
+so lazy TypeScript parser/rule initialization does not consume the first
+boundary assertion's timeout. All forbidden and allowed imports, plus the
+real CLI rejection, remain checked; no timeout was increased.
+
+The PTY harness previously replied `CSI ? 0 u` to Kitty keyboard queries while
+sending legacy key bytes. That reply advertises protocol support, rather than
+declining it, under the
+[Kitty specification](https://sw.kovidgoyal.net/kitty/keyboard-protocol/#detection-of-support-for-this-protocol).
+Fish 4.9.3 reproduced the restored-buffer Ctrl+C failure before correction;
+omitting the unsupported protocol reply passes the same buffer/typeahead
+tests. Production shell code and job control are unchanged.
+
+The vi test's fixed 100ms pause also reproduces the missing second client call
+with fish 3.6.4 configured for a 500ms Escape delay. It now observes the actual
+`fish_bind_mode` transition through a test-only event marker before pressing
+Enter. The same deliberately slow-delay regression passes on fish 3.6.4,
+4.0.2, and 4.9.3, without retries or a longer assertion timeout.
+
+Before/after logs remain under `build/pty-startup-investigation/ci-goal-*`.
+Full check passes 1,675 tests with 10 expected broken-contract failures and
+10 optional skips. Coverage statements/branches/functions/lines is
+97.86/95.83/96.03/98.17 percent.
+Complete E2E passes 122 tests with seven optional iTerm skips on each native
+configuration: Node 22.19.0/bash 4.4/fish 3.6.4, Node 24.21.0/bash 5.2/fish
+4.0.2, and Node 26.7.0/Homebrew bash/fish 4.9.3. All include zsh and the
+macOS bash 3.2 fallback. Fresh local/remote stability results and exact commit
+acceptance are recorded in Beads and the
+[CI investigation record](https://plan.ref.tools/7aNGRE2iAOaOLCzW).
+
 ## Earlier local baseline (2026-09-30)
 
 Before the restart and worker-lifecycle corrections, the validated artifact digest was
