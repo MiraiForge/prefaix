@@ -414,6 +414,29 @@ The subsequent sequential Node 22 run completed successfully. Unchanged
 32.15/34.68/35.40 ms and first-token medians 66.00/68.85/69.63 ms. These are
 local measurements; final CI and new frozen sweeps must establish acceptance.
 
+At `b2e8c31`, all five completed CI performance jobs pass the original budgets;
+macOS Node 24 reports hello/token medians 42.04/71.34 ms. Both local stability
+matrices pass 50/50 with all 100 logs audited (artifact `3c0934d3`, suite
+`ca81e459`). Ordinary Ubuntu Node 22 E2E instead fails fish 3.7.0's raw-prompt
+history assertion: Up recalls the preceding ordinary command. Its completed
+job log is `build/pty-startup-investigation/ci-goal-cache-final-110225894274.log`.
+This rejected head's passing and interrupted remote reports remain separate.
+
+Fifty isolated diagnostic attempts each on fish 3.6.4 and 3.7.0 do not reproduce
+that failure; its precise cause remains unproven. The history test now observes
+a unique editor marker's insertion and deletion before sending Up, strengthening its
+input-readiness precondition beyond prompt painting. The expected recalled raw
+prompt and all subsequent history/identity assertions are unchanged. Missing
+history remains a failure. This test change requires new exact-head CI and
+frozen local and remote stability sweeps; earlier passing sweeps do not replace
+them.
+
+The initial single-character marker was rejected on all three local matrices:
+fish displayed an `x264` autosuggestion after `X`, so the exact screen barrier
+correctly failed. Those full-suite logs remain in
+`build/pty-startup-investigation/ci-goal-history-e2e-*.log`; the final marker has
+no completion or history match in the isolated shell session.
+
 ## Earlier local baseline (2026-09-30)
 
 Before the restart and worker-lifecycle corrections, the validated artifact digest was

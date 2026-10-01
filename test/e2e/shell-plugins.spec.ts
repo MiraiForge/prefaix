@@ -114,6 +114,13 @@ for (const shell of TEST_SHELLS)
       await s.waitForPrompt({ afterRow: row });
       expect(calls()).toHaveLength(1);
       expect(calls()[0]?.at(-1)).toBe(line);
+      // Observe reader input before history navigation. A painted prompt alone
+      // is a rendering observation, as in the restored-buffer cancellation cases.
+      const editorProbe = "__pfx_reader_ready__";
+      s.send(editorProbe);
+      await s.waitFor(new RegExp(`__pfx ${editorProbe}$`, "u"));
+      s.send("\x7f".repeat(editorProbe.length));
+      await s.waitForPrompt();
       s.press("up");
       await s.waitFor(/__pfx : hello.*日本語$/u);
       s.press("ctrl-c");
