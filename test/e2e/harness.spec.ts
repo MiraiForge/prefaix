@@ -2,6 +2,8 @@
 // failure in a prefaix gate is never a failure in the plumbing. These are
 // assertions about a real pty, a real shell, and a real terminal emulator.
 
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   TEST_SHELLS,
@@ -13,6 +15,22 @@ import {
 const open: ShellSession[] = [];
 
 const usable = TEST_SHELLS;
+const pty = createRequire(import.meta.url)(
+  "node-pty",
+) as typeof import("node-pty");
+
+function openPtyDescriptors(): number {
+  return execFileSync(
+    "lsof",
+    ["-nP", "-a", "-p", String(process.pid), "-Ffn"],
+    {
+      encoding: "utf8",
+    },
+  )
+    .split("\n")
+    .filter((line) => /^n(?:\/dev\/(?:ptmx|ttys)|\(revoked\))/u.test(line))
+    .length;
+}
 
 async function session(
   shell: ShellKind,
@@ -36,6 +54,66 @@ describe("pty harness", () => {
     expect(() => {
       ensureSpawnHelper();
     }).not.toThrow();
+  });
+
+  describe.skipIf(process.platform !== "darwin")("native PTY startup", () => {
+    it("retains a controlling terminal through repeated launches without leaking PTYs", async () => {
+      // No shell plugin, startup config, xterm replies, or prompt matching: the
+      // child must already own a controlling tty before any of those run.
+      ensureSpawnHelper();
+      const before = openPtyDescriptors();
+      let next = 0;
+      const failures: string[] = [];
+      async function worker() {
+        while (next < 100) {
+          const run = ++next;
+          const result = await new Promise<string>((resolve) => {
+            const child = pty.spawn(
+              "/bin/sh",
+              ["-c", "exec 3<>/dev/tty; printf '__pfx_tty_ready\\n'"],
+              { cwd: process.cwd(), env: process.env },
+            );
+            let output = "";
+            let timedOut = false;
+            child.onData((data) => (output += data));
+            const timeout = setTimeout(() => {
+              timedOut = true;
+              child.kill("SIGKILL");
+            }, 5_000);
+            child.onExit(({ exitCode, signal }) => {
+              clearTimeout(timeout);
+              resolve(
+                !timedOut &&
+                  exitCode === 0 &&
+                  output.trim() === "__pfx_tty_ready"
+                  ? ""
+                  : `run ${String(run)}: exit=${String(exitCode)} signal=${String(signal)} timeout=${String(timedOut)} output=${JSON.stringify(output)}`,
+              );
+            });
+          });
+          if (result) failures.push(result);
+        }
+      }
+      await Promise.all(Array.from({ length: 4 }, worker));
+      expect(failures).toEqual([]);
+      expect(openPtyDescriptors()).toBe(before);
+    });
+
+    it("releases PTYs when native spawn rejects oversized arguments", () => {
+      ensureSpawnHelper();
+      const before = openPtyDescriptors();
+      // E2BIG occurs in posix_spawn itself, before a child can be returned and
+      // reaped. Missing executables only fail later in Darwin's spawn-helper.
+      for (let run = 0; run < 3; run++) {
+        expect(() =>
+          pty.spawn("/bin/sh", ["-c", "x".repeat(3 * 1024 * 1024)], {
+            cwd: process.cwd(),
+            env: process.env,
+          }),
+        ).toThrow();
+      }
+      expect(openPtyDescriptors()).toBe(before);
+    });
   });
 
   it.each(usable)("brings up a %s with a prompt it can find", async (shell) => {

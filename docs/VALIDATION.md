@@ -63,7 +63,8 @@ more failures, so 50 runs require zero failures. CI's manual `flake_gate` input
 runs this for every supported OS/version pair; release tags require it too.
 Runs are sequential by default. On a machine with sufficient resources,
 `PREFAIX_FLAKE_CONCURRENCY=4` runs four isolated suites at a time. The report
-records that setting and fingerprints both the build and test inputs; changing
+records that setting and fingerprints the build, test inputs, package manifest,
+and dependency lockfile; changing
 either invalidates the sweep. Parallel workers do not retry or omit failures.
 
 `bun run test:perf` uses the built Node CLI, a real daemon with the fake backend,
@@ -142,12 +143,12 @@ inside the write, preserving the existing runtime policy.
 | Check | Current local result |
 |---|---|
 | Full check | Lint/typecheck pass; 1,672 tests pass, 10 expected broken-contract failures, 10 optional skips |
-| Coverage | 97.86% statements, 95.83% branches, 96.03% functions, 98.17% lines |
-| Native shell matrices | 120 passing E2E tests each on Node 22.19/bash 4.4/fish 3.6.4 and Node 24.21/bash 5.2/fish 4.0.2; 7 optional iTerm skips each; both include zsh 5.9 and bash 3.2 fallback |
+| Coverage | 97.88% statements, 95.86% branches, 96.03% functions, 98.19% lines |
+| Native shell matrices | 122 passing E2E tests each on Node 22.19/bash 4.4/fish 3.6.4 and Node 24.21/bash 5.2/fish 4.0.2; 7 optional iTerm skips each; both include zsh 5.9 and bash 3.2 fallback |
 | Clean package install | Private 0.0.0 tarball version, all three init outputs, and a fake turn pass |
 | Installed pi 0.99.1 | No-model RPC smoke passes |
 | Docs and privacy | Generated config reference, privacy guard, and whitespace checks pass |
-| Stability | Pending: a fresh sweep failed fish recovery; follow-up exposed early fixture assertions and a fish PTY startup failure. Failed and superseded inputs remain separate |
+| Stability | Fresh frozen sweeps pass 50/50 each: 7,100 repeated tests, zero failures, four workers per matrix. Failed and superseded attempts remain separate |
 
 `daemon stop` acknowledges a shutdown request. The isolated package check waits
 for the daemon lock to disappear before removing its temporary HOME. The daemon
@@ -201,15 +202,72 @@ Transient fixture stdout is unsuitable because shell repaint can remove it.
 
 Older run 6 separately failed during fish 3.6.4 startup with
 `No TTY for interactive shell (tcgetpgrp failed)` and `setpgid: Inappropriate`.
-Its cause remains unproven and is tracked in Beads `prefaix-mbd.10.4`; the
-readiness corrections are `.10.2` and `.10.3`. The follow-up sweeps detected the
+That startup failure is tracked in Beads `prefaix-mbd.10.4`; the investigation
+below records its native reproduction and resolution. The readiness corrections
+are `.10.2` and `.10.3`. The follow-up sweeps detected the
 test-input edits and invalidated themselves, retaining all logs. Neither counts
-toward final stability. The final input still needs a complete passing sweep.
+toward final stability. The final passing sweeps below use fresh, frozen inputs.
 
 Real pi child-tree RSS and laptop energy consumption remain unmeasured. These
 fixes bound worker ownership and replay count; they do not establish a battery
-percentage or a total-process-tree memory budget. Linux CI, refreshed stability,
-and the human release requirements remain pending.
+percentage or a total-process-tree memory budget. Linux CI and the human release
+requirements remain pending.
+
+## Fish PTY startup investigation and final stability (2026-10-01 UTC)
+
+The fish startup symptom was reproduced in node-pty 1.1.0's native Darwin launch
+path without fish, Prefaix, or xterm. A small C child checked `tcgetpgrp(0)`, its
+own process group/session, and opening `/dev/tty`. One of 1,000 bounded launches
+on Node 22.19.0 returned `tcgetpgrp = -1` with `ENOTTY` and `/dev/tty` failed with
+`ENXIO`, while the process was its own session and process-group leader. A
+Node 26.7.0 sample reproduced the same condition in one of 100 launches. This
+isolates the failure below shell initialization and terminal-query handling;
+the exact kernel interleaving remains unproven.
+
+The native dependency also leaked PTY resources. New regression tests fail
+against 1.1.0: 100 successful launches leave 200 PTY-related descriptors open,
+and three native `E2BIG` spawn failures leave nine more. Longer standalone churn
+eventually fails with `posix_spawnp failed`. The host's `kern.tty.ptmx_max` is
+511. [Upstream issue 950](https://github.com/microsoft/node-pty/issues/950)
+describes the Darwin descriptor-cleanup defects. These observations establish
+the leak and startup failure independently; they do not prove the leak alone
+caused the retained fish failure.
+
+The development dependency is now pinned to `node-pty@1.2.0-beta.15`, whose
+native Darwin implementation closes the parent slave and temporary master
+descriptors. Both new regressions pass with no descriptor growth, and 1,000
+standalone native launches each on Node 24.21.0 and Node 26.7.0 pass without a
+missing controlling terminal. Full native E2E matrices pass 122 tests each,
+including the new startup/failed-spawn regressions, all shell plugins, and exact
+tty restoration. The beta is an explicit test dependency pin; Linux verification
+still belongs to the outstanding CI gate. No startup retry, failure exclusion,
+job-control change, or timeout increase was added.
+
+Both fresh 50-repeat sweeps pass the original <1% gate:
+
+| Matrix | UTC start / finish | Repeats | Tests | Failures |
+|---|---|---|---|---|
+| Node 22.19.0 / bash 4.4 / fish 3.6.4 | 00:35:06 / 00:46:20 | 50/50 | 3,550 | 0 |
+| Node 24.21.0 / bash 5.2 / fish 4.0.2 | 00:35:06 / 00:42:47 | 50/50 | 3,550 | 0 |
+
+Both include zsh 5.9 and macOS bash 3.2 fallback, with four workers per matrix.
+Every one of the 100 unique repeat logs reports exactly 71 passing tests.
+Both reports record artifact digest
+`4a9434ed1e487887744f59cea64205b920b5e85f3b0f1aec3e44022ad205a96f`
+and source/test/dependency digest
+`f6d1f5e3145659cd6546f66e093764d0bf15d6a53a5b3fe47191359ae8693478`.
+The manifest and lockfile are now included in the sweep fingerprint so a native
+dependency change invalidates its evidence. Logs and reports are in
+`build/flake-pty-final-{low,high}`; native probes, before/after regression logs,
+full E2E, check, and coverage evidence are in `build/pty-startup-investigation`.
+Earlier failed and invalidated attempts remain untouched and separate.
+
+Fresh full check passes 1,672 tests with 10 expected broken-contract failures
+and 10 optional skips. Coverage is 97.88/95.86/96.03/98.19 percent for
+statements/branches/functions/lines. Beads `.10.2`, `.10.3`, and `.10.4` now
+meet their local acceptance criteria; the parent `.10` still needs Linux CI
+and required checks on `main`. Git publication and CI acceptance are recorded
+separately in Beads.
 
 ## Earlier local baseline (2026-09-30)
 

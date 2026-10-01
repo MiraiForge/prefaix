@@ -41,6 +41,8 @@ function suiteHash() {
   walk("test/e2e");
   add("vitest.e2e.config.ts");
   add("scripts/flake.mjs");
+  add("package.json");
+  add("bun.lock");
   return hash.digest("hex");
 }
 const suiteSha256 = suiteHash();
