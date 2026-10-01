@@ -298,6 +298,16 @@ with fish 3.6.4 configured for a 500ms Escape delay. It now observes the actual
 Enter. The same deliberately slow-delay regression passes on fish 3.6.4,
 4.0.2, and 4.9.3, without retries or a longer assertion timeout.
 
+A fresh high-version sweep then exposed a separate restored-typeahead race
+in run 13. The client had already cleaned up and written directives, but the
+fish buffer's repaint preceded reliable processing of the next Ctrl+C.
+The test now appends a real `X` keystroke and observes its rendered edit before
+cancelling the buffer. It checks that neither the original nor edited command
+created a file, both before cancellation and after ordinary-command recovery.
+This observes editor readiness without executing a probe or sleeping longer.
+The rejected/invalidated attempts remain in `build/flake-ci-goal-{low,high}`;
+their results are not final passing stability evidence.
+
 Before/after logs remain under `build/pty-startup-investigation/ci-goal-*`.
 Full check passes 1,675 tests with 10 expected broken-contract failures and
 10 optional skips. Coverage statements/branches/functions/lines is

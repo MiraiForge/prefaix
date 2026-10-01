@@ -510,8 +510,15 @@ for (const shell of TEST_SHELLS)
       s.send("\x1b");
       await s.waitFor("typed-must-wait");
       expect(existsSync(join(home, "typed-must-wait"))).toBe(false);
+      // A repaint can precede the editor's next input cycle. Prove the restored
+      // buffer is editable before Ctrl+C, rather than treating paint as readiness.
+      s.send("X");
+      await s.waitFor(/typed-must-wait\s*X/u);
+      expect(existsSync(join(home, "typed-must-waitX"))).toBe(false);
       s.send("\x03");
       expect(await s.run("echo recovered")).toBe("recovered");
+      expect(existsSync(join(home, "typed-must-wait"))).toBe(false);
+      expect(existsSync(join(home, "typed-must-waitX"))).toBe(false);
     });
     it("recovers from a daemon killed during a turn", async () => {
       const { s, home } = await real("long");
