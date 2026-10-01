@@ -437,6 +437,30 @@ correctly failed. Those full-suite logs remain in
 `build/pty-startup-investigation/ci-goal-history-e2e-*.log`; the final marker has
 no completion or history match in the isolated shell session.
 
+At `c8f41ec`, all six ordinary unit/E2E/coverage stages pass, and both fresh
+local sweeps pass 50/50 with every 71-test log audited. Artifact `3c0934d3` is
+unchanged; the corrected test fingerprint is `518ac49e` (full digests in
+`build/flake-ci-goal-history-final-{low,high}/summary.json`). macOS Node 26
+instead fails timing at 65.91/105.13 ms hello/token medians. Its independent
+322-byte Node/socket probe measures 67.86 ms median, already above the hello
+budget; compiled Bun's floor is 50.95 ms. The reports and completed job log
+remain in `build/ci-goal-history-final-check-artifacts` and
+`build/pty-startup-investigation/ci-goal-history-final-110231673703.log`.
+
+CI now separates required performance jobs from the functional suites, using
+versioned standard `ubuntu-24.04` and `macos-15` runners on Node 22/24/26.
+[GitHub's runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+identifies the standard macOS 15 runner as arm64 M1. The six functional jobs
+and four shell-version matrices continue on the latest OS images. Every
+performance job still enforces the original timing, throughput and memory
+gates with all 50 samples and the existing RSS-only Node 26 exception. The
+M3 aggregate also requires the performance matrix to succeed.
+
+This fixes the benchmark OS labels and isolates their workload from the test
+suites; it does not establish that macOS 26 caused the slow measurement, or
+eliminate shared-host variability. Final exact-head CI and fresh frozen sweeps
+must pass on this declared benchmark baseline before acceptance.
+
 ## Earlier local baseline (2026-09-30)
 
 Before the restart and worker-lifecycle corrections, the validated artifact digest was
