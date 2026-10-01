@@ -308,10 +308,22 @@ This observes editor readiness without executing a probe or sleeping longer.
 The rejected/invalidated attempts remain in `build/flake-ci-goal-{low,high}`;
 their results are not final passing stability evidence.
 
+A subsequent frozen CI run at `3e780b5` exposed the same readiness gap in the
+fixture's restored-directive cancellation test. Ubuntu older shells failed
+run 41 and macOS older shells failed run 13, each one of 50 repeats; both
+newer-shell gates passed 50/50. The test had sent Ctrl+C as soon as the
+restored text was painted. It now observes an actual `X` insertion at the
+restored zero cursor before cancellation, then checks that the command never
+created its file, including after ordinary-command recovery. The full failed
+reports and all repeat logs remain in `build/ci-goal-final-remote-stability`.
+The 64 focused local before-correction probes did not reproduce the CI race;
+they remain in `build/ci-goal-restored-directive-before`. This further test
+change requires new frozen local and remote sweeps for final acceptance.
+
 Before/after logs remain under `build/pty-startup-investigation/ci-goal-*`.
 Full check passes 1,675 tests with 10 expected broken-contract failures and
 10 optional skips. Coverage statements/branches/functions/lines is
-97.86/95.83/96.03/98.17 percent.
+97.83/95.83/95.93/98.15 percent.
 Complete E2E passes 122 tests with seven optional iTerm skips on each native
 configuration: Node 22.19.0/bash 4.4/fish 3.6.4, Node 24.21.0/bash 5.2/fish
 4.0.2, and Node 26.7.0/Homebrew bash/fish 4.9.3. All include zsh and the

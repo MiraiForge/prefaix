@@ -190,8 +190,14 @@ for (const shell of TEST_SHELLS)
       s.sendLine(": restore");
       await s.waitFor("echo safe; touch");
       expect(existsSync(join(home, "unsafe"))).toBe(false);
+      // The restored cursor is zero. Observe a real edit before Ctrl+C;
+      // the buffer can be painted before the editor resumes reading input.
+      s.send("X");
+      await s.waitFor("Xecho safe; touch");
+      expect(existsSync(join(home, "unsafe"))).toBe(false);
       s.send("\x03");
       expect(await s.run("echo recovered")).toBe("recovered");
+      expect(existsSync(join(home, "unsafe"))).toBe(false);
     });
     it.each([
       ["default", "日本語🙂後X"],
