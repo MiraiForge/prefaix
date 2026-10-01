@@ -93,6 +93,52 @@ it("loads the packaged client without the asynchronous filesystem helpers", () =
   );
   expect(JSON.parse(output)).toEqual([]);
 });
+it.each(["enabled", "disabled", "blocked"] as const)(
+  "runs a packaged local turn with compile caching %s",
+  (mode) => {
+    const cache = join(installed, `compile-cache-${mode}`);
+    const state = join(installed, `cache-state-${mode}.json`);
+    const directives = join(installed, `cache-directives-${mode}`);
+    if (mode === "blocked") writeFileSync(cache, "not a directory");
+    // Set the directory after Node bootstrap, so enabling via NODE_COMPILE_CACHE
+    // at process launch cannot satisfy the regression without the CLI's call.
+    const preload = `
+      import { writeFileSync } from "node:fs";
+      process.env.NODE_COMPILE_CACHE = ${JSON.stringify(cache)};
+      ${mode === "disabled" ? 'process.env.NODE_DISABLE_COMPILE_CACHE = "1";' : ""}
+      process.on("exit", () => writeFileSync(${JSON.stringify(state)}, JSON.stringify({ directory: process.getBuiltinModule("module").getCompileCacheDir() })));
+    `;
+    const text = execFileSync(
+      node,
+      [
+        "--import",
+        `data:text/javascript,${encodeURIComponent(preload)}`,
+        join(installed, "dist/prefaix.js"),
+        "run",
+        "--shell",
+        "zsh",
+        "--shell-id",
+        "1-1-cache",
+        "--nonce",
+        "cache",
+        "--directives",
+        directives,
+        "--",
+        ":help",
+      ],
+      { env, encoding: "utf8", timeout: 10_000 },
+    );
+    expect(text).toContain(":help");
+    expect(readFileSync(directives, "utf8")).toBe("nonce\0cache\0");
+    const result = JSON.parse(readFileSync(state, "utf8")) as {
+      directory?: string;
+    };
+    if (mode === "enabled") {
+      expect(result.directory).toContain(cache);
+      expect(readdirSync(cache, { recursive: true }).length).toBeGreaterThan(1);
+    } else expect(result.directory).toBeUndefined();
+  },
+);
 it("keeps crypto unloaded when importing the daemon before a store write", () => {
   const daemon = readdirSync(join(installed, "dist")).find((name) =>
     /^daemon-.*\.js$/u.test(name),

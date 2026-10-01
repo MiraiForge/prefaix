@@ -376,6 +376,44 @@ exception are unchanged. Fresh exact-head checks and frozen local/remote
 stability evidence are required for this changed production artifact; their
 acceptance is recorded in Beads and the CI investigation record above.
 
+The first startup correction (`a54472c`) passed both new local 50-repeat
+matrices, with all 100 logs audited. CI passed five complete checks, including
+macOS Node 26 at 38.04 ms hello and 63.38 ms first-token medians, but macOS
+Node 24 failed at 63.14 and 100.19 ms. Its independent Node/socket floor was
+55.83 ms; memory and throughput passed. These reports are retained in
+`build/ci-goal-startup-final-check-artifacts`, and local stability reports in
+`build/flake-ci-goal-startup-final-{low,high}` retain artifact `15ee38d7`
+and suite `d8cf4d60` (full digests in their summaries).
+
+The next follow-up enables Node's optional
+[module compile cache](https://nodejs.org/api/module.html#module-compile-cache)
+for actual client processes before importing the client chunks. It honors
+Node's cache-directory and disable settings, and a blocked cache remains
+nonfatal. Other commands and Bun do not enable this optimization. Imported
+source modules used by the coverage suite also do not enable it.
+The existing one-process warmup primes compilation; all 50 subsequent fresh
+processes retain their complete spawn-to-hello and first-output timings.
+No process is reused, no samples are dropped, and budgets are unchanged.
+
+The isolated Node 26 experiment improves hello median from 36.30 to 32.07 ms.
+Real packaged-process tests prove cache creation, explicit disabling, and a
+non-directory cache path with successful local turns and exact directives.
+The cache-creation case fails on the preceding code; enabled, disabled, and
+blocked cases all pass with the correction. Experiment reports and logs remain
+in `build/pty-startup-investigation/startup-experiments/compile-cache-*`.
+This additional source/test change requires new frozen stability evidence;
+partial remote runs on the preceding head are retained as superseded evidence.
+
+With the compile-cache correction, full check passes 1,676 tests and coverage
+statements/branches/functions/lines is 97.71/95.54/95.94/98.05%. All three full
+local E2E configurations pass 126 tests each, with seven optional iTerm skips.
+An earlier concurrently launched Node 22 E2E process exited with SIGTERM before
+reporting results; its log is retained separately and its cause is unproven.
+The subsequent sequential Node 22 run completed successfully. Unchanged
+50-sample performance checks pass on Node 22/24/26, with hello medians
+32.15/34.68/35.40 ms and first-token medians 66.00/68.85/69.63 ms. These are
+local measurements; final CI and new frozen sweeps must establish acceptance.
+
 ## Earlier local baseline (2026-09-30)
 
 Before the restart and worker-lifecycle corrections, the validated artifact digest was

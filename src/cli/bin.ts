@@ -56,6 +56,12 @@ export function isEntry(url: string, argv1: string | undefined): boolean {
 }
 
 if (isEntry(import.meta.url, process.argv[1])) {
+  // Reuse compiled client chunks between short-lived turns. Node honors its
+  // cache/disable environment settings and treats an unavailable cache as optional.
+  if (process.argv[2] === "run" && process.versions["bun"] === undefined)
+    process
+      .getBuiltinModule("module")
+      .enableCompileCache(process.env["NODE_COMPILE_CACHE"]);
   // The terminal is already back in cooked mode by the time this resolves: the
   // client restores it on every exit path, including the ones that threw.
   process.exitCode =
