@@ -1,4 +1,3 @@
-import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { shellRuntimeFiles, type PrefaixPaths } from "./paths.js";
 
 let sequence = 0;
@@ -9,6 +8,7 @@ export async function writeShellStatus(
   shellId: string,
   text: string,
 ): Promise<void> {
+  const { mkdir, rename, unlink, writeFile } = await import("node:fs/promises");
   const { dir, status } = shellRuntimeFiles(paths, shellId);
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const temp = `${status}.${String(process.pid)}.${String(sequence++)}.tmp`;

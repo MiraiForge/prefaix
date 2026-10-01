@@ -331,6 +331,51 @@ macOS bash 3.2 fallback. Fresh local/remote stability results and exact commit
 acceptance are recorded in Beads and the
 [CI investigation record](https://plan.ref.tools/7aNGRE2iAOaOLCzW).
 
+## CI startup follow-up (2026-10-01)
+
+The corrected restored-directive fixture passed both local 50-repeat matrices
+and all four serial remote matrices on `415a735`. All 300 distinct logs were
+audited: 71 tests per local/macOS repeat and 70 per Ubuntu repeat, where the
+macOS native-bash fallback is not applicable. Reports retain artifact digest
+`4a9434ed1e487887744f59cea64205b920b5e85f3b0f1aec3e44022ad205a96f`
+and source/test/dependency digest
+`f06968a631a2b41aa75c4f9a35018db889d507876704e9fbd352aeee09f43cfc`.
+Remote summaries and every log are in
+`build/ci-goal-directive-final-remote-stability`; both local reports are in
+`build/flake-ci-goal-directive-final-{low,high}`.
+
+[CI run 36811226560](https://github.com/MiraiForge/prefaix/actions/runs/36811226560)
+passed all six unit/E2E/coverage stages, but macOS Node 26 failed only the
+unchanged client-hello median budget: 61.74 ms against 60 ms. Its first-token
+median was 99.90 ms against 100 ms. This uses the same production artifact as
+the preceding passing performance run, so it establishes limited margin on a
+variable runner rather than a source regression. The independent Node/socket
+floor on that worker was 56.62 ms. The full failed report remains in
+`build/ci-goal-directive-final-check-artifacts`.
+
+The follow-up routes client turns through a small dispatcher and loads the
+picker and asynchronous filesystem helpers only when requested or writing
+results. Config validation and command classification still precede the daemon
+connection. Doctor, injected terminal/I/O, handshake, turn rendering, and
+directive behavior are preserved. The packaged-import regression fails on
+the original code and verifies deferred filesystem loading on the correction.
+Full check passes 1,676 tests, with 10 expected broken-contract failures and
+10 optional skips. Coverage statements/branches/functions/lines is
+97.74/95.65/95.84/98.07 percent. Each of the three complete local E2E
+configurations passes 123 tests with seven optional iTerm skips.
+
+Isolated Node 26 comparisons retain every 50-sample report. The first control
+and candidate hello/first-token medians are 38.01/72.49 and 36.23/69.07 ms;
+a consecutive control/candidate comparison records 37.36/71.16 and
+36.30/69.83 ms. Single-bundle, independent-client-bundle, renderer-overlap, and
+picker/clipboard-only experiments did not give useful median improvement and
+were rejected. Reports and regression logs remain in
+`build/pty-startup-investigation/startup-experiments`.
+The timing definitions, budgets, sample count, and approved Node 26 RSS-only
+exception are unchanged. Fresh exact-head checks and frozen local/remote
+stability evidence are required for this changed production artifact; their
+acceptance is recorded in Beads and the CI investigation record above.
+
 ## Earlier local baseline (2026-09-30)
 
 Before the restart and worker-lifecycle corrections, the validated artifact digest was

@@ -4,7 +4,6 @@
 // turn, write directives, exit. The tty is only taken for a turn, and it is
 // given back on every path out of here, including the ones that throw.
 
-import { mkdir, rename, writeFile } from "node:fs/promises";
 import { posix } from "node:path";
 import {
   EXIT,
@@ -45,7 +44,7 @@ import type {
   StatusSnapshot,
   TurnSummary,
 } from "../core/protocol.js";
-import { pick, type PickItem } from "./picker.js";
+import type { PickItem } from "./picker.js";
 import { copyText } from "./clipboard.js";
 import { plain } from "./process.js";
 import {
@@ -627,8 +626,9 @@ async function runCommand(
   }
   const choose =
     options.picker ??
-    ((items: readonly PickItem[], title: string) =>
-      pick({
+    (async (items: readonly PickItem[], title: string) => {
+      const { pick } = await import("./picker.js");
+      return pick({
         items,
         title,
         mode: config.ui.picker,
@@ -637,7 +637,8 @@ async function runCommand(
         ...(options.tty === undefined ? {} : { tty: options.tty }),
         ...(options.rows === undefined ? {} : { rows: options.rows }),
         ...(options.cols === undefined ? {} : { cols: options.cols }),
-      }));
+      });
+    });
   if (
     ["model", "m", "think"].includes(parsed.name) &&
     args.conversationId === ""
@@ -882,6 +883,7 @@ export async function writeDirectives(
   if (target === "" || directives.nonce === "") {
     return;
   }
+  const { mkdir, rename, writeFile } = await import("node:fs/promises");
   const temp = `${target}.${String(process.pid)}.tmp`;
   await mkdir(posix.dirname(target), { recursive: true, mode: 0o700 }).catch(
     () => undefined,

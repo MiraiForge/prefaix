@@ -82,6 +82,17 @@ it("keeps process, crypto, and readline natives unloaded until a feature needs t
   );
   expect(JSON.parse(output)).toEqual([]);
 });
+it("loads the packaged client without the asynchronous filesystem helpers", () => {
+  const client = readdirSync(join(installed, "dist")).find((name) =>
+    /^run-.*\.js$/u.test(name),
+  );
+  expect(client).toBeDefined();
+  const url = pathToFileURL(join(installed, "dist", client!)).href;
+  const output = evaluate(
+    `await import(${JSON.stringify(url)}); process.stdout.write(JSON.stringify(process.moduleLoadList.filter(name => name === "NativeModule fs/promises")));`,
+  );
+  expect(JSON.parse(output)).toEqual([]);
+});
 it("keeps crypto unloaded when importing the daemon before a store write", () => {
   const daemon = readdirSync(join(installed, "dist")).find((name) =>
     /^daemon-.*\.js$/u.test(name),

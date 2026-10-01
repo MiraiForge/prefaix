@@ -1,5 +1,6 @@
 import {
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -140,6 +141,29 @@ describe("the bin", () => {
 
   it("dispatches through the same entry the process uses", async () => {
     expect(await runCli(["--version"], VERSION)).toBe(EXIT.ok);
+  });
+
+  it("runs a local help turn through the client entry and writes its directives", async () => {
+    const directives = join(home, "directives");
+    expect(
+      await runCli(
+        [
+          "run",
+          "--shell",
+          "zsh",
+          "--shell-id",
+          "1-1-bin",
+          "--nonce",
+          "bin",
+          "--directives",
+          directives,
+          "--",
+          ":help",
+        ],
+        VERSION,
+      ),
+    ).toBe(EXIT.ok);
+    expect(readFileSync(directives, "utf8")).toBe("nonce\0bin\0");
   });
 });
 

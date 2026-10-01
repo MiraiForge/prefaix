@@ -4,7 +4,6 @@
 
 import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { main } from "./index.js";
 import { prepareDaemonRuntime } from "./daemon-runtime.js";
 import type { ExitCode } from "../core/errors.js";
 
@@ -32,10 +31,15 @@ export function cliVersion(
   }
 }
 
-export function runCli(
+export async function runCli(
   argv: readonly string[],
   version: string = cliVersion(),
 ): Promise<ExitCode> {
+  if (argv[0] === "run") {
+    const { runClient } = await import("./run.js");
+    return runClient({ argv: argv.slice(1), version });
+  }
+  const { main } = await import("./index.js");
   return main({ argv, version });
 }
 

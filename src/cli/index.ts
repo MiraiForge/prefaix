@@ -129,36 +129,14 @@ export async function main(options: CliOptions): Promise<ExitCode> {
         return await runDoctor({ env, paths, out, err });
       }
       case "run": {
-        const { run } = await import("../client/run.js");
-        return await run({
+        const { runClient } = await import("./run.js");
+        return await runClient({
+          ...options,
           argv: rest,
-          version: options.version,
           env,
           paths,
           out,
           err,
-          doctor: async (args) => {
-            const { runDoctor } = await import("./doctor.js");
-            return runDoctor({
-              env,
-              paths,
-              out,
-              err,
-              shell: args.shell,
-              shellVersion: args.shellVersion,
-              pluginLoaded: env["PREFAIX_PLUGIN_LOADED"] === "1",
-            });
-          },
-          ...(options.isTty === undefined
-            ? {}
-            : { stdoutIsTty: options.isTty }),
-          ...(options.cols === undefined ? {} : { cols: options.cols }),
-          ...(options.rows === undefined ? {} : { rows: options.rows }),
-          ...(options.tty === undefined ? {} : { tty: options.tty }),
-          ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
-          ...(options.connect === undefined
-            ? {}
-            : { connect: options.connect }),
         });
       }
       case "daemon": {

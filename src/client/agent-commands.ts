@@ -1,4 +1,3 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentCommand } from "../core/agent-port.js";
 import { isConversationId } from "../core/ids.js";
@@ -22,6 +21,7 @@ export async function cacheCommands(
   commands: readonly AgentCommand[],
 ): Promise<void> {
   if (!isConversationId(conversationId)) return;
+  const { mkdir, rename, writeFile } = await import("node:fs/promises");
   const directory = join(paths.runtimeDir, "commands");
   const file = join(directory, `${conversationId}.json`);
   const temp = `${file}.${String(process.pid)}.tmp`;
@@ -39,6 +39,7 @@ export async function cachedCommands(
   conversationId: string,
 ): Promise<AgentCommand[]> {
   if (!isConversationId(conversationId)) return [];
+  const { readFile } = await import("node:fs/promises");
   try {
     const raw: unknown = JSON.parse(
       await readFile(
