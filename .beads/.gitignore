@@ -16,8 +16,9 @@ daemon.*
 # Push state (runtime, per-machine)
 push-state.json
 
-# Lock files (various runtime locks)
+# Lock files (various runtime locks, including diagnostic sidecars)
 *.lock
+*.lock.info
 
 # Credential key (encryption key for federation peer auth — never commit)
 .beads-credential-key
