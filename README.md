@@ -8,6 +8,42 @@ The M3 implementation is under validation. **The npm package is not published
 yet.** See the [release gate](docs/RELEASE.md), [design](docs/DESIGN.md), and
 [roadmap](docs/ROADMAP.md).
 
+## Roadmap
+
+Progress snapshot as of **2026-10-07**. Implementation and release acceptance
+are separate: the core is complete and the triple-shell MVP is implemented,
+but **0.1.0 has not shipped**.
+
+| Milestone | Status | Finished | Remaining |
+|---|---|---|---|
+| **M0 — Foundations** | Complete | Strict TypeScript tooling, builds, CI, architecture/ADRs, layering checks, and private-package safeguards. | Ongoing maintenance. |
+| **M1 — Design spikes** | Partially verified | [S1: pi RPC lifecycle](docs/spikes/S1-pi-rpc-lifecycle.md), including stream/continuation, abort, retry/compaction ordering, shutdown/kill behavior, and ten reviewed replay fixtures. | S2–S9: pool economics, cross-directory resume, shell/plugin coexistence, raw tty behavior, cold-start comparison, and bridge/tool-activation evidence, including recorded extension UI. |
+| **M2 — Core** | Complete | Backend-independent AgentPort, fake and pi adapters, bridge, daemon/pool/store, foreground client, safe directives, renderer, CLI, and contract tests. | Follow-up hardening, including cumulative pi usage/cache-cost accounting and explicit provider pinning in the opt-in live bridge test. |
+| **M3 — Triple-shell MVP → 0.1.0** | Implemented; acceptance in progress | zsh/fish/bash plugins, bash 3.2 fallback, MVP commands, pickers, prompt status, doctor, setup/uninstall, docs, and automated validation gates. | Cross-platform/version acceptance, stability and performance evidence, human walkthrough/daily-use checks, release preparation, and explicit publishing approval. |
+| **M4 — Parity and beyond Forge** | Planned | Foundations from the core and MVP. | Command suggestions and commit drafting, detach/attach, steering, personas, completions, TUI handoff, additional conversation commands, richer context capture, and terminal polish. |
+| **M5 — Hardening → 1.0** | Planned | Backend abstraction and safety checks to build on. | A second adapter and backend switching, security review, wider distribution/docs site, WSL/terminal validation, and conditional compiled-client/ble.sh work. |
+
+S1 combines real Kimi turns for streaming/abort/kill with actual pi processes
+against a **controlled loopback API** for retry/compaction. Those controlled
+cases are not evidence of natural provider failures. Other spike evidence and
+the overall M1 exit gate remain open even though M2 is complete.
+
+**Next: finish the 0.1.0 acceptance and release gates.**
+
+- Complete the supported shell/version matrix on macOS and Linux, the 50-rerun
+  stability gate, and performance measurements on both platforms.
+- Confirm a clean daily-driver doctor result, a fresh-machine README walkthrough,
+  and three days of daily use on at least two shells without tty corruption or
+  lost typeahead.
+- Enforce the required CI checks and prepare/verify npm trusted publishing and
+  the prefaix.dev placeholder. Publishing still needs Allan's explicit approval;
+  the package stays private until then.
+
+The [detailed roadmap](docs/ROADMAP.md) defines tasks and acceptance criteria;
+the [validation guide](docs/VALIDATION.md) and [release gate](docs/RELEASE.md)
+define the remaining evidence. Beads remains the live task source of truth;
+this section is a public progress summary, not a separate task tracker.
+
 ## Install from source
 
 Use Node 22.19+ and Bun 1.3.14. Full interception requires zsh 5.8+, fish 3.6+,
