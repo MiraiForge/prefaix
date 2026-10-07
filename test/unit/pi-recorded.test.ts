@@ -69,7 +69,7 @@ describe("reviewed native S1 fixtures", () => {
     const names = readdirSync(FIXTURES).filter((name) =>
       name.endsWith(".jsonl"),
     );
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(11);
     for (const name of names) {
       const raw = readFileSync(join(FIXTURES, name), "utf8");
       const header = JSON.parse(raw.split("\n")[0]!) as Record<string, unknown>;

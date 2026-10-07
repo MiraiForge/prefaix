@@ -20,7 +20,7 @@ lists use JSON arrays, and paths expand a leading `~`. Unknown keys are errors.
 | `pool.max_children` | integer (minimum 1) | `6` | `PREFAIX_POOL_MAX_CHILDREN` |
 | `pool.idle_minutes` | number (minimum 0) | `15` | `PREFAIX_POOL_IDLE_MINUTES` |
 | `pool.spare` | boolean | `true` | `PREFAIX_POOL_SPARE` |
-| `workspace.cwd_policy` | follow / split / stay | `"follow"` | `PREFAIX_WORKSPACE_CWD_POLICY` |
+| `workspace.cwd_policy` | follow / split / stay | `"split"` | `PREFAIX_WORKSPACE_CWD_POLICY` |
 | `workspace.resume` | none / last-in-root | `"none"` | `PREFAIX_WORKSPACE_RESUME` |
 | `ui.thinking` | hidden / summary / stream | `"hidden"` | `PREFAIX_UI_THINKING` |
 | `ui.footer` | time / tools / cost / context / model | `["time","tools","cost","context","model"]` | `PREFAIX_UI_FOOTER` |

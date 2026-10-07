@@ -108,6 +108,16 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
     defaultTools = [];
   }
 
+  // The factory's API can still be unbound. Native pi 1.0.4 returns []
+  // there; session_start is the first reliable runtime baseline (S9).
+  pi.on("session_start", () => {
+    try {
+      defaultTools = pi.getActiveTools?.() ?? defaultTools ?? [];
+    } catch {
+      // Keep the best-effort load-time baseline if this API is unavailable.
+    }
+  });
+
   pi.on("before_agent_start", (event: BridgeEvent) => {
     if (dir === undefined) {
       return;

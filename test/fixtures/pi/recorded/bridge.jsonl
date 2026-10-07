@@ -1,0 +1,17 @@
+{"type":"prefaix_fixture_header","version":1,"scenario":"bridge","source":"controlled","provider":"kimi-coding","model":"kimi-coding/k3","piVersion":"1.0.4","recordedAt":"2026-10-07T15:37:06.547Z","stimulus":{"api":"loopback-stub","remoteModelRequests":0,"scriptedUsage":true},"curated":true,"provenance":{"capture":"bridge.jsonl","sha256":"68079c1613a0cd81c606dc61227e80eeed5c1520ff573e8144dfc35e6db4c4d3","recordRange":[53,70]},"transforms":["remove responses, startup/state, user/system messages, thinking and signatures, timestamps, provider request IDs and details","normalize opaque IDs","omit duplicate agent_end messages","add causal replay holds/pacing"],"replay":{"promptAck":"recorded"}}
+{"type":"extension_ui_request","id":"id-1","method":"select","title":"Which branch?","options":["main","release/2.1"]}
+{"waitForUi":"id-1"}
+{"type":"extension_ui_request","id":"id-2","method":"notify","message":"S9 selected main","notifyType":"info"}
+{"type":"extension_ui_request","id":"id-3","method":"setStatus","statusKey":"s9","statusText":"dialog complete"}
+{"type":"extension_ui_request","id":"id-4","method":"set_editor_text","text":"echo suggestion-waits-for-enter"}
+{"ackPrompt":true}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"message_start","message":{"role":"assistant","content":[{"type":"text","text":"","index":0}],"api":"anthropic-messages","provider":"kimi-coding","model":"k3","usage":{"input":64,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":64,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cacheWrite1h":0},"stopReason":"pending"}}
+{"type":"message_update","usage":{"input":64,"output":8,"cacheRead":0,"cacheWrite":0,"totalTokens":72,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cacheWrite1h":0},"assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","usage":{"input":64,"output":8,"cacheRead":0,"cacheWrite":0,"totalTokens":72,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cacheWrite1h":0},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"S9 scripted native bridge answer."}}
+{"type":"message_update","usage":{"input":64,"output":8,"cacheRead":0,"cacheWrite":0,"totalTokens":72,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cacheWrite1h":0},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"S9 scripted native bridge answer."}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"S9 scripted native bridge answer."}],"api":"anthropic-messages","provider":"kimi-coding","model":"k3","usage":{"input":64,"output":8,"cacheRead":0,"cacheWrite":0,"totalTokens":72,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cacheWrite1h":0},"stopReason":"stop","rawStopReason":"end_turn","thinkingLevel":"off"}}
+{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"S9 scripted native bridge answer."}],"api":"anthropic-messages","provider":"kimi-coding","model":"k3","usage":{"input":64,"output":8,"cacheRead":0,"cacheWrite":0,"totalTokens":72,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cacheWrite1h":0},"stopReason":"stop","rawStopReason":"end_turn","thinkingLevel":"off"},"toolResults":[]}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"agent_settled"}

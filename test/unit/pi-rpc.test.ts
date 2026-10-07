@@ -305,17 +305,17 @@ describe("pi transport shutdown", () => {
   it("escalates to SIGTERM when the child ignores stdin", async () => {
     const rpc = new PiRpc({
       bin: process.execPath,
-      // Ignores stdin EOF; only SIGTERM ends it, and pi answers that with 143.
+      // The handshake proves the signal handler is installed before close.
       args: [
         "-e",
-        'process.stdin.resume(); setInterval(() => {}, 1000); process.on("SIGTERM", () => process.exit(143));',
+        'setInterval(() => {}, 1000); process.on("SIGTERM", () => process.exit(143)); process.stdin.on("data", () => console.log(JSON.stringify({id:"r1",type:"response",command:"get_state",success:true,data:{}})));',
       ],
       cwd: ROOT,
       env: {},
       termGraceMs: 150,
       killGraceMs: 150,
     });
-    rpc.spawn();
+    await rpc.waitReady();
     const result = await rpc.close();
     expect(result.escalatedTo).toBe("SIGTERM");
     expect(result.exit.code).toBe(143);
@@ -324,18 +324,20 @@ describe("pi transport shutdown", () => {
   it("escalates to SIGKILL when SIGTERM is ignored, and synthesizes the exit", async () => {
     const rpc = new PiRpc({
       bin: process.execPath,
+      // Do not race child startup with SIGTERM when the machine is busy.
       args: [
         "-e",
-        'process.stdin.resume(); setInterval(() => {}, 1000); process.on("SIGTERM", () => {});',
+        'setInterval(() => {}, 1000); process.on("SIGTERM", () => {}); process.stdin.on("data", () => console.log(JSON.stringify({id:"r1",type:"response",command:"get_state",success:true,data:{}})));',
       ],
       cwd: ROOT,
       env: {},
       termGraceMs: 120,
       killGraceMs: 1_000,
     });
-    rpc.spawn();
+    await rpc.waitReady();
     const result = await rpc.close();
     expect(result.escalatedTo).toBe("SIGKILL");
+    expect(result.exit).toEqual({ code: null, signal: "SIGKILL" });
   });
 
   it("is idempotent", async () => {

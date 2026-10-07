@@ -25,6 +25,7 @@ const EVENTS = new Set([
   "auto_retry_end",
   "compaction_start",
   "compaction_end",
+  "extension_ui_request",
 ]);
 const OMIT = new Set([
   "timestamp",
@@ -41,9 +42,18 @@ const OMIT = new Set([
 export function curateRpcCapture(options: {
   recordDir: string;
   outputDir: string;
+  spike?: "s9";
 }): string[] {
   const report = object(
-    JSON.parse(readFileSync(join(options.recordDir, "summary.json"), "utf8")),
+    JSON.parse(
+      readFileSync(
+        join(
+          options.recordDir,
+          options.spike === "s9" ? "s9-summary.json" : "summary.json",
+        ),
+        "utf8",
+      ),
+    ),
   );
   assert.equal(
     report["status"],
@@ -56,7 +66,8 @@ export function curateRpcCapture(options: {
   );
   assert(
     report["format"] === "prefaix-s1-report" ||
-      report["format"] === "prefaix-s1-controlled-report",
+      report["format"] === "prefaix-s1-controlled-report" ||
+      (options.spike === "s9" && report["format"] === "prefaix-s9-report"),
   );
   assertLiveAllowed({
     PREFAIX_LIVE_PROVIDER: String(report["provider"]),
@@ -68,9 +79,11 @@ export function curateRpcCapture(options: {
     const scenario = object(entry);
     const name = String(scenario["scenario"]);
     assert(
-      /^(stream|abort-text|abort-tool|kill-text|retry-success|retry-exhausted|retry-abort|compact-threshold|compact-overflow|compact-manual)$/u.test(
-        name,
-      ),
+      options.spike === "s9"
+        ? name === "bridge"
+        : /^(stream|abort-text|abort-tool|kill-text|retry-success|retry-exhausted|retry-abort|compact-threshold|compact-overflow|compact-manual)$/u.test(
+            name,
+          ),
     );
     const capture = `${name}.jsonl`;
     const raw = readFileSync(join(options.recordDir, capture), "utf8");
@@ -133,7 +146,17 @@ export function curateRpcCapture(options: {
     const events: RecordValue[] = [];
     let held = false;
     let paced = false;
+    let acknowledged = false;
     for (const r of records.slice(start, end)) {
+      if (
+        name === "bridge" &&
+        r["type"] === "response" &&
+        r["command"] === "prompt"
+      ) {
+        assert(!acknowledged, "Repeated prompt acknowledgment");
+        events.push({ ackPrompt: true });
+        acknowledged = true;
+      }
       if (!EVENTS.has(String(r["type"]))) continue;
       const message = object(r["message"]);
       if (
@@ -164,6 +187,13 @@ export function curateRpcCapture(options: {
       // These arrays duplicate message contents; no mapper uses them.
       if (r["type"] === "agent_end") copy["messages"] = [];
       events.push(copy);
+      if (
+        name === "bridge" &&
+        r["type"] === "extension_ui_request" &&
+        r["method"] === "select"
+      ) {
+        events.push({ waitForUi: copy["id"] });
+      }
       if (name === "stream" && nested["type"] === "text_delta" && !paced) {
         // A state query in the contract needs an in-flight turn. This is replay
         // pacing, not a measurement of provider latency.
@@ -171,6 +201,8 @@ export function curateRpcCapture(options: {
         paced = true;
       }
     }
+    if (name === "bridge")
+      assert(acknowledged, "Missing native prompt acknowledgment");
     const killed = name === "kill-text";
     if (killed) events.push({ untilCommand: "prefaix_fixture_kill" });
     else if (name !== "compact-manual")
@@ -192,13 +224,15 @@ export function curateRpcCapture(options: {
         "add causal replay holds/pacing",
       ],
       replay:
-        name === "compact-manual"
-          ? { command: "compact" }
-          : held
-            ? { abort: "drain" }
-            : killed
-              ? { terminal: "kill" }
-              : {},
+        name === "bridge"
+          ? { promptAck: "recorded" }
+          : name === "compact-manual"
+            ? { command: "compact" }
+            : held
+              ? { abort: "drain" }
+              : killed
+                ? { terminal: "kill" }
+                : {},
     };
     const text =
       [fixtureHeader, ...events].map((r) => JSON.stringify(r)).join("\n") +
@@ -222,6 +256,8 @@ export function curateRpcCapture(options: {
 }
 
 export function rpcCurateMain(argv: readonly string[]): void {
+  const s9 = argv[0] === "--s9";
+  if (s9) argv = argv.slice(1);
   if (argv.length === 1 && argv[0] === "--help") {
     console.log(
       "Usage: bun scripts/spikes/rpc-curate.ts <record-directory> <new-output-directory>\nNo model requests. Review outputs before adding them to test fixtures.",
@@ -236,6 +272,7 @@ export function rpcCurateMain(argv: readonly string[]): void {
   const files = curateRpcCapture({
     recordDir: resolve(argv[0]!),
     outputDir: resolve(argv[1]!),
+    ...(s9 ? { spike: "s9" as const } : {}),
   });
   console.log(
     `Prepared ${files.length} replay fixtures; review before sharing.`,

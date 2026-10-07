@@ -188,7 +188,7 @@ export const CONFIG_SCHEMA: SectionNode = section({
     spare: field("spare", "boolean", true),
   }),
   workspace: section({
-    cwd_policy: field("cwd_policy", "enum", "follow", { values: CWD_POLICIES }),
+    cwd_policy: field("cwd_policy", "enum", "split", { values: CWD_POLICIES }),
     resume: field("resume", "enum", "none", { values: RESUME_POLICIES }),
   }),
   ui: section({

@@ -51,6 +51,18 @@ export interface MapperOptions {
   readonly now?: () => number;
 }
 
+interface Usage {
+  input: number;
+  output: number;
+  costUsd?: number | undefined;
+}
+
+function amount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
 interface ToolState {
   name: string;
   startedAt: number;
@@ -89,10 +101,10 @@ export class TurnMapper {
   #settled = false;
   #lastStopReason: StopReason = "stop";
   #lastError: string | undefined;
-  #usage: { input: number; output: number; costUsd?: number | undefined } = {
-    input: 0,
-    output: 0,
-  };
+  #usage: Usage = { input: 0, output: 0 };
+  #messageUsage: Usage = { input: 0, output: 0 };
+  #previousUsage: Usage = { input: 0, output: 0 };
+  #emittedUsage: Usage = { input: 0, output: 0 };
   readonly #tools = new Map<string, ToolState>();
   #uiCounter = 0;
   // Undefined until the first usage is emitted: a clock that starts near zero
@@ -150,6 +162,13 @@ export class TurnMapper {
 
     if (type === "message_start") {
       this.#blocksByIndex = new Map();
+      const role = asRecord(fields["message"])?.["role"];
+      if (role === "assistant" || role === undefined) {
+        // pi counters are cumulative per response, NOT per turn. User/tool
+        // message boundaries do not roll the response into the turn totals.
+        this.#previousUsage = this.#usage;
+        this.#messageUsage = { input: 0, output: 0 };
+      }
     }
 
     if (type === "message_end") {
@@ -407,19 +426,26 @@ export class TurnMapper {
     usage: Record<string, unknown>,
     options: { readonly final?: boolean } = {},
   ): AgentEvent | undefined {
-    const next = {
-      input:
-        typeof usage["input"] === "number" ? usage["input"] : this.#usage.input,
-      output:
-        typeof usage["output"] === "number"
-          ? usage["output"]
-          : this.#usage.output,
-      costUsd: this.#readCost(usage) ?? this.#usage.costUsd,
+    const current = this.#messageUsage;
+    const cost = this.#readCost(usage);
+    current.input = Math.max(current.input, amount(usage["input"]) ?? 0);
+    current.output = Math.max(current.output, amount(usage["output"]) ?? 0);
+    if (cost !== undefined)
+      current.costUsd = Math.max(current.costUsd ?? 0, cost);
+    const base = this.#previousUsage;
+    const next: Usage = {
+      input: base.input + current.input,
+      output: base.output + current.output,
+      ...(base.costUsd === undefined && current.costUsd === undefined
+        ? {}
+        : {
+            costUsd: (base.costUsd ?? 0) + (current.costUsd ?? 0),
+          }),
     };
     const changed =
-      next.input !== this.#usage.input ||
-      next.output !== this.#usage.output ||
-      next.costUsd !== this.#usage.costUsd;
+      next.input !== this.#emittedUsage.input ||
+      next.output !== this.#emittedUsage.output ||
+      next.costUsd !== this.#emittedUsage.costUsd;
     this.#usage = next;
     if (!changed) {
       return undefined;
@@ -433,6 +459,7 @@ export class TurnMapper {
       return undefined;
     }
     this.#lastUsageAt = now;
+    this.#emittedUsage = next;
     return {
       type: "usage",
       input: next.input,
@@ -442,17 +469,18 @@ export class TurnMapper {
   }
 
   #readCost(usage: Record<string, unknown>): number | undefined {
-    const direct = usage["cost"];
-    if (typeof direct === "number") {
-      return direct;
-    }
+    const direct = amount(usage["cost"]);
+    if (direct !== undefined) return direct;
     const cost = asRecord(usage["cost"]);
-    if (cost === undefined) {
-      return undefined;
-    }
-    const input = typeof cost["input"] === "number" ? cost["input"] : 0;
-    const output = typeof cost["output"] === "number" ? cost["output"] : 0;
-    return input + output;
+    if (cost === undefined) return undefined;
+    const total = amount(cost["total"]);
+    if (total !== undefined) return total;
+    const parts = ["input", "output", "cacheRead", "cacheWrite"]
+      .map((key) => amount(cost[key]))
+      .filter((value): value is number => value !== undefined);
+    return parts.length === 0
+      ? undefined
+      : parts.reduce((sum, value) => sum + value, 0);
   }
 
   #mapUiRequest(fields: Record<string, unknown>): AgentEvent[] {

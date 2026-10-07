@@ -117,7 +117,7 @@ describe("config defaults", () => {
         },
       },
       pool: { maxChildren: 6, idleMinutes: 15, spare: true },
-      workspace: { cwdPolicy: "follow", resume: "none" },
+      workspace: { cwdPolicy: "split", resume: "none" },
       ui: {
         thinking: "hidden",
         footer: ["time", "tools", "cost", "context", "model"],

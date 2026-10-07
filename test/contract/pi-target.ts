@@ -48,7 +48,7 @@ const SCRIPTS: Record<ContractCase, string> = {
 export interface PiTargetOptions {
   readonly hang?: boolean;
   readonly trace?: boolean;
-  /** Reviewed native S1 captures; UI/tools still use supplemental type fixtures. */
+  /** Reviewed native S1/S9 captures; built-in tools use supplemental type fixtures. */
   readonly recorded?: boolean;
 }
 
@@ -156,7 +156,7 @@ export function piTarget(options: PiTargetOptions = {}): ContractTarget {
   return {
     name:
       options.recorded === true
-        ? "pi (recorded S1 + supplemental UI/tool replay)"
+        ? "pi (recorded S1/S9 + supplemental tool replay)"
         : "pi (fixture replay)",
     capabilities: createPiAdapter().capabilities,
     probe: async () => ({ installed: true, usable: true, version: "fixture" }),
@@ -169,6 +169,7 @@ export function piTarget(options: PiTargetOptions = {}): ContractTarget {
     async start(caseName: ContractCase): Promise<TurnRun> {
       const recorded: Partial<Record<ContractCase, string>> = {
         stream: "stream.jsonl",
+        dialog: "bridge.jsonl",
         error: "retry-exhausted.jsonl",
         retry: "retry-success.jsonl",
         abortDuringTool: "abort-tool.jsonl",

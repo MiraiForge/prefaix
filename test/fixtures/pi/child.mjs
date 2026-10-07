@@ -83,13 +83,15 @@ function awaitCommand(type, since) {
   });
 }
 
-function awaitUi(uiId) {
+function awaitUi(uiId, since) {
   return new Promise((resolve) => {
     if (
-      seen.some(
-        (command) =>
-          command.type === "extension_ui_response" && command.id === uiId,
-      )
+      seen
+        .slice(since)
+        .some(
+          (command) =>
+            command.type === "extension_ui_response" && command.id === uiId,
+        )
     ) {
       resolve(undefined);
       return;
@@ -98,12 +100,12 @@ function awaitUi(uiId) {
   });
 }
 
-async function play(since) {
+async function play(since, promptId) {
   state.isStreaming = true;
   for (const record of fixture) {
     if (record.type === "prefaix_fixture_header") continue;
     if (record["waitForUi"] !== undefined) {
-      await awaitUi(record["waitForUi"]);
+      await awaitUi(record["waitForUi"], since);
     }
     if (record["untilCommand"] !== undefined) {
       await awaitCommand(record["untilCommand"], since);
@@ -116,6 +118,10 @@ async function play(since) {
       return;
     }
     // Strip the keys the child interprets for itself and never emits.
+    if (record.ackPrompt === true) {
+      ok(promptId, "prompt", undefined);
+      continue;
+    }
     const rest = { ...record };
     delete rest.delay;
     delete rest.waitForUi;
@@ -412,8 +418,13 @@ process.stdin.on("data", (chunk) => {
       }
       case "prompt": {
         aborted = false;
-        ok(id, "prompt", undefined);
-        playback = play(recordedAbort ? seen.length - 1 : 0);
+        if (replay.promptAck !== "recorded") ok(id, "prompt", undefined);
+        playback = play(
+          recordedAbort || replay.promptAck === "recorded"
+            ? seen.length - 1
+            : 0,
+          id,
+        );
         break;
       }
       case "no_such_command": {

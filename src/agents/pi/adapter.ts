@@ -47,10 +47,11 @@ import {
   asState,
   asStats,
   asText,
-  isAgentStart,
+  type PiRecord,
 } from "./types.js";
 
 import { PI_ID, piCapabilities } from "./capabilities.js";
+import { assertResumeRoot } from "./resume-root.js";
 export { PI_ID, bridgeConfigured } from "./capabilities.js";
 
 export interface PiAdapterOptions {
@@ -60,6 +61,8 @@ export interface PiAdapterOptions {
   /** Where per-turn context files live; required for the bridge to work. */
   readonly turnsDir?: string;
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Explicit provider selection; development live gates must set this. */
+  readonly provider?: string;
   readonly model?: string | null;
   readonly thinking?: string | null;
   readonly personaTools?: readonly string[] | undefined;
@@ -109,6 +112,11 @@ export function buildSpawnPlan(
   const bridge = config.bridgePath;
   if (bridge !== undefined && bridge !== "") {
     args.push("-e", bridge);
+  }
+
+  const provider = options.model?.provider ?? config.provider;
+  if (provider !== undefined && provider !== "") {
+    args.push("--provider", provider);
   }
 
   // pi's configured default is openai-codex, so a model is only ever passed
@@ -258,6 +266,7 @@ export class PiSession implements AgentSession {
     const turn = AbortSignal.any([signal, controller.signal]);
     const mapper = new TurnMapper(this.#mapperOptions);
     this.#mapper = mapper;
+    let iterator: AsyncIterator<PiRecord> | undefined;
 
     try {
       // A prompt that is already aborted must not reach pi at all.
@@ -275,17 +284,22 @@ export class PiSession implements AgentSession {
       }
 
       const message = this.#compose(input);
-      await this.#rpc.request("prompt", { message });
-
-      // pi only starts streaming once it has the prompt, so the turn's records
-      // begin here. Anything before this turn's agent_start is left over from a
-      // turn that was abandoned, most often by an abort.
-      const iterator = this.#rpc.events[Symbol.asyncIterator]();
+      // before_agent_start can request a dialog BEFORE acknowledging prompt.
+      // Read concurrently or neither pi nor the foreground can make progress.
+      const accepted = this.#rpc.request("prompt", { message });
+      const failure = accepted.then(() => new Promise<never>(() => {}));
+      // A terminal/abort can win before the acknowledgment: no later rejection
+      // may become an unhandled promise or corrupt a subsequent turn.
+      void failure.catch(() => undefined);
+      iterator = this.#rpc.events[Symbol.asyncIterator]();
       let started = false;
       for (;;) {
         // An abort has to end the turn even if pi goes quiet afterwards, so it
         // is raced rather than polled between records.
-        const step = await raceAbort(iterator.next(), turn);
+        const step = await raceAbort(
+          Promise.race([iterator.next(), failure]),
+          turn,
+        );
         if (step === ABORTED) {
           // The user pressed Esc: give the prompt back now rather than waiting
           // on a settle this build cannot prove arrives. The abandoned read is
@@ -301,7 +315,10 @@ export class PiSession implements AgentSession {
         }
         const record = step.value;
         if (!started) {
-          if (!isAgentStart(record)) {
+          if (record.type !== "agent_start") {
+            if (record.type === "extension_ui_request") {
+              for (const event of mapper.map(record)) yield event;
+            }
             continue;
           }
           started = true;
@@ -324,6 +341,7 @@ export class PiSession implements AgentSession {
     } finally {
       // A turn the bridge never picked up (an abort before before_agent_start,
       // a pi that died) must not leave its context on disk for the next turn.
+      await iterator?.return?.();
       this.#clearContextFile();
       this.#busy = false;
       this.#turnAbort = undefined;
@@ -686,6 +704,7 @@ export class PiAdapter implements AgentBackend {
   }
 
   async open(opts: OpenOptions): Promise<AgentSession> {
+    await assertResumeRoot(opts.resume?.sessionFile, opts.root);
     const plan = buildSpawnPlan(opts, this.#options);
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(opts.env)) {

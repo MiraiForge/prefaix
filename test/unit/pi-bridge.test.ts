@@ -243,6 +243,40 @@ describe("per-turn context out of band", () => {
 });
 
 describe("personas switch tools without a respawn", () => {
+  it("captures the runtime tool baseline after an unbound empty load-time API", () => {
+    const fake = fakePi([]);
+    bridge(fake);
+    fake.pi.getActiveTools = () => ["read", "bash"];
+    fake.fire({ type: "session_start" });
+    startTurn(fake, {
+      version: BRIDGE_VERSION,
+      context: CONTEXT,
+      persona: { name: "ask", tools: ["read"] },
+    });
+    startTurn(fake, { version: BRIDGE_VERSION, context: CONTEXT });
+    expect(fake.applied).toEqual([["read"], ["read", "bash"]]);
+  });
+
+  it("keeps the load-time baseline if the runtime API throws or is absent", () => {
+    for (const unavailable of [false, true]) {
+      const fake = fakePi(["read", "bash"]);
+      bridge(fake);
+      fake.pi.getActiveTools = unavailable
+        ? (undefined as never)
+        : () => {
+            throw new Error("unavailable");
+          };
+      fake.fire({ type: "session_start" });
+      startTurn(fake, {
+        version: BRIDGE_VERSION,
+        context: CONTEXT,
+        persona: { name: "ask", tools: ["read"] },
+      });
+      startTurn(fake, { version: BRIDGE_VERSION, context: CONTEXT });
+      expect(fake.applied.at(-1)).toEqual(["read", "bash"]);
+    }
+  });
+
   it("narrows the tool set and records the persona section", () => {
     const fake = fakePi();
     bridge(fake);

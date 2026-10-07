@@ -29,11 +29,9 @@ import {
   LIVE_ENV,
   type LiveRequest,
 } from "../../scripts/live-guard.js";
-import {
-  createPiAdapter,
-  type PiSession,
-} from "../../src/agents/pi/adapter.js";
+import { type PiSession } from "../../src/agents/pi/adapter.js";
 import { defaultConfig } from "../../src/core/config/schema.js";
+import { openLivePi } from "../../scripts/live-pi.js";
 import { turnContextFile } from "../../src/agents/pi/bridge-context.js";
 import type { ShellContext } from "../../src/core/agent-port.js";
 import type { AgentEvent } from "../../src/core/agent-port.js";
@@ -80,28 +78,26 @@ beforeAll(async () => {
   }
   dir = mkdtempSync(join(tmpdir(), "pfx-live-"));
   const config = defaultConfig();
-  const adapter = createPiAdapter({
-    bin: config.agent.pi.bin,
-    // The slug carries the vendor, so `--model` names the provider too. pi's
-    // configured default is never relied on, which is the same rule the guard
-    // enforces.
-    model: live.model,
-    turnsDir: dir,
-    bridgePath: bridgeBundlePath(),
-    log: (message, fields) => {
-      console.log(`  live pi: ${message} ${JSON.stringify(fields ?? {})}`);
-    },
-  });
-  session = (await adapter.open({
-    root: process.cwd(),
-    // pi's own environment, minus the undefined entries `process.env` is
-    // allowed to have and a child is not.
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(
-        (pair): pair is [string, string] => pair[1] !== undefined,
+  session = await openLivePi(
+    {
+      root: process.cwd(),
+      // pi's own environment, minus the undefined entries `process.env` is
+      // allowed to have and a child is not.
+      env: Object.fromEntries(
+        Object.entries(process.env).filter(
+          (pair): pair is [string, string] => pair[1] !== undefined,
+        ),
       ),
-    ),
-  })) as PiSession;
+    },
+    {
+      bin: config.agent.pi.bin,
+      turnsDir: dir,
+      bridgePath: bridgeBundlePath(),
+      log: (message, fields) => {
+        console.log(`  live pi: ${message} ${JSON.stringify(fields ?? {})}`);
+      },
+    },
+  );
   for await (const event of session.prompt(
     { text: ": say hello", context: CONTEXT },
     new AbortController().signal,

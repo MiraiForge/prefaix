@@ -1,13 +1,19 @@
-# Reviewed S1 pi RPC fixtures
+# Reviewed native pi RPC fixtures
 
 These are curated **native pi 1.0.4** stdout recordings, not hand-written protocol
 examples. See `docs/spikes/S1-pi-rpc-lifecycle.md` for the method and conclusions.
+S9 adds recorded extension UI; see `docs/spikes/S9-pi-bridge-extension.md`.
 The original files remain private in ignored `build/spikes/` directories.
 
 | Source | Fixtures | Meaning |
 |---|---|---|
 | `live` | `stream`, `abort-text`, `abort-tool`, `kill-text` | Actual Kimi K3 coding-plan turns. |
 | `controlled` | `retry-success`, `retry-exhausted`, `retry-abort`, `compact-threshold`, `compact-overflow`, `compact-manual` | Actual pi processes against a loopback HTTP/SSE stub. Failures, answers, usage, limits, and zero prices are scripted; no remote model requests or real credentials. |
+
+The controlled S9 `bridge` fixture captures a select dialog, notification,
+status, and editor suggestion **before prompt acknowledgment and agent_start**.
+It is native pi output against the same isolated loopback approach, not a
+hand-written dialog. Its source and provenance are distinct from S1.
 
 Each JSONL starts with a `prefaix_fixture_header`. Its SHA-256 identifies the full
 original raw capture, including that capture's header. `recordRange` is half-open
@@ -31,6 +37,9 @@ The child replayer ignores fixture headers and understands these explicit contro
   **replay pacing, not measured provider latency**.
 - `replay.command: "compact"` plays the manual-compaction fixture for that command
   and responds with its result. It has no new `agent_settled`.
+- `waitForUi: "<id>"` holds until a fresh matching response on each turn.
+  `replay.promptAck: "recorded"` and `ackPrompt: true` preserve the captured
+  acknowledgment boundary rather than inventing an early response.
 
 Regenerate into a **new** directory with `scripts/spikes/rpc-curate.ts`, review
 private-data removal, then explicitly copy the approved outputs here. Curation
@@ -39,5 +48,6 @@ headers, and invalid ranges. It never overwrites raw evidence. Automated pattern
 checks are not a substitute for review.
 
 The root `test/fixtures/pi/*.jsonl` files remain supplemental type-built inputs,
-including UI and normal built-in tool examples. The recorded contract target
-identifies those supplements explicitly; S9's recorded UI evidence is separate.
+including normal built-in tool examples and additional UI variants. The recorded
+contract target uses S9 for its dialog and identifies other supplements explicitly.
+Replay cancellation controls are not proof of native long-held dialog cancellation.
