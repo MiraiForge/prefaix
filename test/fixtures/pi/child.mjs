@@ -36,11 +36,19 @@ if (fixturePath === undefined) {
   process.exit(2);
 }
 
+const header = fixture.find(
+  (record) => record.type === "prefaix_fixture_header",
+);
+const replay = header?.replay ?? {};
+const recordedAbort = replay.abort === "drain";
 const seen = [];
+let playback = Promise.resolve();
+let lastCompaction;
 let buffer = "";
 let lastId = null;
 let closed = false;
-// A real pi stops producing when it is aborted mid-turn.
+// Legacy type-built fixtures stop immediately. Recorded cancellations instead
+// drain the native terminal records and acknowledge abort after settlement.
 let aborted = false;
 
 if (tracePath !== undefined) {
@@ -65,9 +73,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Resolvers waiting on a command type or a ui response, keyed by what they await. */
 const waiters = { command: new Map(), ui: new Map() };
 
-function awaitCommand(type) {
+function awaitCommand(type, since) {
   return new Promise((resolve) => {
-    if (seen.some((command) => command.type === type)) {
+    if (seen.slice(since).some((command) => command.type === type)) {
       resolve(undefined);
       return;
     }
@@ -90,14 +98,15 @@ function awaitUi(uiId) {
   });
 }
 
-async function play() {
+async function play(since) {
   state.isStreaming = true;
   for (const record of fixture) {
+    if (record.type === "prefaix_fixture_header") continue;
     if (record["waitForUi"] !== undefined) {
       await awaitUi(record["waitForUi"]);
     }
     if (record["untilCommand"] !== undefined) {
-      await awaitCommand(record["untilCommand"]);
+      await awaitCommand(record["untilCommand"], since);
     }
     if (record["delay"] !== undefined) {
       await sleep(record["delay"]);
@@ -135,6 +144,7 @@ async function play() {
     if (rest.type === "agent_settled") {
       state.isStreaming = false;
     }
+    if (rest.type === "compaction_end") lastCompaction = rest.result;
     // A record that only holds a hold-point has nothing to emit.
     if (rest.type === undefined) {
       continue;
@@ -155,7 +165,13 @@ const state = {
   isStreaming: false,
   lastAssistantText: null,
   queue: [],
-  model: { id: "gpt-6-sol", name: "GPT-6 Sol", provider: "openai-codex" },
+  model:
+    header === undefined
+      ? { id: "gpt-6-sol", name: "GPT-6 Sol", provider: "openai-codex" }
+      : {
+          id: header.model.slice(header.provider.length + 1),
+          provider: header.provider,
+        },
 };
 
 function ok(id, command, data) {
@@ -362,9 +378,15 @@ process.stdin.on("data", (chunk) => {
         break;
       }
       case "abort": {
-        aborted = true;
-        state.isStreaming = false;
-        ok(id, "abort", undefined);
+        if (recordedAbort) {
+          // The hold resolves above; native settle records must precede this
+          // response. Do not suppress them as the legacy replayer did.
+          void playback.then(() => ok(id, "abort", undefined));
+        } else {
+          aborted = true;
+          state.isStreaming = false;
+          ok(id, "abort", undefined);
+        }
         break;
       }
       case "clear_queue": {
@@ -376,7 +398,12 @@ process.stdin.on("data", (chunk) => {
         break;
       }
       case "compact": {
-        ok(id, "compact", { summary: "fixture summary", tokensBefore: 1000 });
+        if (replay.command === "compact") {
+          playback = play(seen.length - 1);
+          void playback.then(() => ok(id, "compact", lastCompaction));
+        } else {
+          ok(id, "compact", { summary: "fixture summary", tokensBefore: 1000 });
+        }
         break;
       }
       case "get_fork_messages": {
@@ -384,8 +411,9 @@ process.stdin.on("data", (chunk) => {
         break;
       }
       case "prompt": {
+        aborted = false;
         ok(id, "prompt", undefined);
-        void play();
+        playback = play(recordedAbort ? seen.length - 1 : 0);
         break;
       }
       case "no_such_command": {

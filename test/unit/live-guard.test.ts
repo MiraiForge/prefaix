@@ -26,7 +26,14 @@ describe("live guard", () => {
   });
 
   it("refuses the vendors development never bills", () => {
-    for (const provider of ["anthropic", "openai", "openai-codex"]) {
+    for (const provider of [
+      "anthropic",
+      "anthropic-compatible",
+      "openai",
+      "openai-compatible",
+      "openai-codex",
+      "openai-codex-custom",
+    ]) {
       expect(() =>
         assertLiveAllowed({ ...allowed, PREFAIX_LIVE_PROVIDER: provider }),
       ).toThrow(/not allowed/);
@@ -61,6 +68,8 @@ describe("live guard", () => {
       "openrouter/anthropic/claude-sonnet-5",
       "some-router/openai/gpt-5",
       "gateway/openai-codex/o3",
+      "gateway/anthropic-compatible/claude",
+      "gateway/openai-compatible/gpt",
     ]) {
       expect(() =>
         assertLiveAllowed({

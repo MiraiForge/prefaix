@@ -61,7 +61,7 @@ export function assertLiveAllowed(env: Env = process.env): LiveRequest {
   const slug = (model ?? "").trim();
 
   const lowered = named.toLowerCase();
-  if (REFUSED_PROVIDERS.includes(lowered)) {
+  if (REFUSED_PROVIDERS.some((prefix) => lowered.startsWith(prefix))) {
     refuse(`${LIVE_ENV.provider} ${JSON.stringify(named)} is not allowed`);
   }
   const loweredModel = slug.toLowerCase();
@@ -71,7 +71,11 @@ export function assertLiveAllowed(env: Env = process.env): LiveRequest {
   const vendor = REFUSED_MODEL_PREFIXES.map((prefix) =>
     prefix.replace("/", ""),
   );
-  if (segments.some((segment) => vendor.includes(segment))) {
+  if (
+    segments.some((segment) =>
+      vendor.some((prefix) => segment.startsWith(prefix)),
+    )
+  ) {
     refuse(`model ${JSON.stringify(slug)} is not allowed`);
   }
   // A model slug with no vendor is ambiguous; pi would fall back to whatever

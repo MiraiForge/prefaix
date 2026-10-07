@@ -48,6 +48,8 @@ const SCRIPTS: Record<ContractCase, string> = {
 export interface PiTargetOptions {
   readonly hang?: boolean;
   readonly trace?: boolean;
+  /** Reviewed native S1 captures; UI/tools still use supplemental type fixtures. */
+  readonly recorded?: boolean;
 }
 
 /** Every command the child was sent, in order. */
@@ -152,14 +154,33 @@ export function piTarget(options: PiTargetOptions = {}): ContractTarget {
   };
 
   return {
-    name: "pi (fixture replay)",
+    name:
+      options.recorded === true
+        ? "pi (recorded S1 + supplemental UI/tool replay)"
+        : "pi (fixture replay)",
     capabilities: createPiAdapter().capabilities,
     probe: async () => ({ installed: true, usable: true, version: "fixture" }),
     // An idle session: open() already waited for readiness, so a turn that
     // starts here would find no fixture to play.
-    open: () => open("stream.jsonl"),
+    open: () =>
+      open(
+        options.recorded === true ? "recorded/stream.jsonl" : "stream.jsonl",
+      ),
     async start(caseName: ContractCase): Promise<TurnRun> {
-      return new PiRun(await open(SCRIPTS[caseName]));
+      const recorded: Partial<Record<ContractCase, string>> = {
+        stream: "stream.jsonl",
+        error: "retry-exhausted.jsonl",
+        retry: "retry-success.jsonl",
+        abortDuringTool: "abort-tool.jsonl",
+        abortFromSignal: "abort-text.jsonl",
+        abortFromMethod: "abort-text.jsonl",
+      };
+      const script = options.recorded === true ? recorded[caseName] : undefined;
+      return new PiRun(
+        await open(
+          script === undefined ? SCRIPTS[caseName] : `recorded/${script}`,
+        ),
+      );
     },
   };
 }

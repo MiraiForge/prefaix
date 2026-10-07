@@ -584,7 +584,7 @@ Type definitions are imported **type-only** from a pinned dev dependency on `@ea
 | `extension_ui_request` (`notify` / `setStatus` / `setWidget` / `setTitle` / `set_editor_text`) | `notice` / `status` / (ignored or info) / (title) / `set_buffer` |
 | `extension_error` | `notice {level:"warn"}` |
 | `agent_end {willRetry}` | Nothing, because more work may follow. |
-| **`agent_settled`** | `settled`, with `stopReason` from the last assistant `message_end` |
+| **`agent_settled`** | `settled`, with `stopReason` from the last assistant `message_end` unless explicit user-abort intent takes priority |
 
 **Measured, see [spikes/S1](spikes/S1-pi-rpc-lifecycle.md):** the protocol is
 not JSON-RPC 2.0. A request is `{id, type, …}` with the command name in `type`,
@@ -594,6 +594,24 @@ events. Readiness is the first successful `get_state`, but pi intermittently
 blocks at startup with no output at all, so ready is a wait with a deadline.
 Closing stdin exits 0, SIGTERM exits 143, and SIGKILL writes nothing, so the
 transport has to synthesize that failure.
+
+**Live abort evidence (pi 1.0.4, Kimi K3 coding plan):** both mid-text and
+mid-tool aborts emitted `agent_settled` before the abort response and were idle
+on the next state query. A tool abort ended with a zero-usage raw assistant
+`error` (`This operation was aborted`), so explicit abort intent must determine
+the normalized `aborted` result rather than relying on the raw reason alone.
+SIGKILL mid-text produced no native settlement.
+
+**Native retry/compaction evidence (pi 1.0.4, controlled loopback API):** retry
+recovery, exhaustion, and cancellation all settle once after the retry ends.
+Threshold compaction finishes before settlement. Overflow recovery can follow
+`agent_end {willRetry:false}`, compact, and start another run before settlement;
+therefore even a false flag is not an idle boundary. An idle manual `compact`
+command instead completes with `compaction_end` and its response, without a new
+`agent_settled`. These are actual pi RPC measurements with scripted HTTP/SSE
+stimuli and zero remote model requests, not natural Kimi failures. Reviewed
+live/controlled replay fixtures retain provenance and source labels. See
+[the S1 results and final decision](spikes/S1-pi-rpc-lifecycle.md).
 
 #### 4.5.4 Bridge extension (`pi-bridge.js`, shipped inside the package)
 
@@ -1006,6 +1024,16 @@ The same scenario list runs for every shell. This is the release gate:
 - It passes `--provider/--model` explicitly, so pi's configured default (currently `openai-codex`) is never used.
 - The recorded fixture header stores the provider and model used.
 
+`bun run spike:rpc-live` is the opt-in S1 lifecycle recorder. It refuses before
+spawning, pins both selection flags, checks the actual model before each prompt,
+and retains private raw stdout, command/exit traces, and native transcripts.
+Injected test children are explicitly labeled synthetic. A successful recorder
+run alone does not answer retry/compaction questions or replace evidence review.
+S1 now includes a separate `spike:rpc-controlled` command: actual pi RPC against
+a loopback-only API stub, with dummy auth, isolated profiles, explicit selection,
+and no remote requests. Such captures are labeled `controlled`, not `live` or
+synthetic child tests. See [the S1 results](spikes/S1-pi-rpc-lifecycle.md).
+
 ### 12.5 CI
 
 GitHub Actions matrix `{ubuntu-latest, macos-latest} × {node 22, node 24}`:
@@ -1042,7 +1070,7 @@ Terminals tested manually per release: Ghostty, iTerm2, Terminal.app, WezTerm, k
 
 | # | Question | Blocks |
 |---|---|---|
-| S1 | Exact event ordering around abort, retry, and compaction; does `abort` always end in `agent_settled`? | Turn manager |
+| S1 | Resolved for pi 1.0.4: live Kimi stream/abort/SIGKILL, controlled native retry/compaction, and ten reviewed replay fixtures. See S1's evidence boundaries. | Turn manager |
 | S2 | Child RSS; does `--offline` speed spawn without side effects; spare adoption via `get_state` | Pool defaults |
 | S3 | `--session <file>` from a different cwd: tool cwd and `cwd` section behavior | `cwd_policy` default |
 | S4 | bash macro plus dynamic rebind across 4.4/5.1/5.2 and vi mode | bash plugin |
