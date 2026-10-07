@@ -20,6 +20,13 @@ const sources = {
     ],
     "d86b3392c1202e8ff5a423b302e6284db7f8f435ea9f39b5b1b20fd3ac36dfcb",
   ],
+  "bash@5.1": [
+    [
+      "https://mirrors.kernel.org/gnu/bash/bash-5.1.tar.gz",
+      "https://ftp.gnu.org/gnu/bash/bash-5.1.tar.gz",
+    ],
+    "cc012bc860406dcf42f64431bcd3d2fa7560c02915a601aba9cd597a39329baa",
+  ],
   "bash@5.2": [
     [
       "https://mirrors.kernel.org/gnu/bash/bash-5.2.tar.gz",

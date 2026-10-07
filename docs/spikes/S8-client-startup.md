@@ -3,13 +3,13 @@
 **Question:** Does M3 need a compiled client to meet the daemon-hello startup
 budget, or can it retain the bundled Node client?
 
-**Decision:** Keep the bundled Node client for M3. On the M-series Mac, the full
-client meets its p50 <60ms / p95 <120ms budget. A minimal compiled Bun client
-saves at most 4.3ms at p50 over the equivalent Node stub and produces a 60.5MiB
-executable. This does not justify a second distribution/runtime path locally.
-The decision remains provisional until the prepared Linux CI comparison runs;
-S8 stays open. This client experiment does not address the daemon's unresolved
-Node 26 post-use memory overrun.
+**Status: resolved, 2026-10-07. Decision:** Keep the bundled Node client for
+M3. The full client meets its p50 <60ms / p95 <120ms hello budget on both native
+CI platforms. Compiled Bun saves 7–12ms at p50 on the virtual Mac, but is
+**slower** by 3–6ms on Linux and adds a 60.5MiB/90.2MiB runtime artifact.
+That does not justify a second distribution/runtime path. Node 26's distinct
+daemon RSS overrun on macOS remains explicitly allowlisted by Allan, not fixed
+by compiling the client.
 
 ## Method
 
@@ -57,10 +57,40 @@ Raw reports: [Node 22](S8-client-startup-node22.json),
 The full client measurements and the distinct memory failure are in
 [VALIDATION.md](../VALIDATION.md).
 
-## Remaining evidence
+## Native CI comparison: 2026-10-07
 
-The Linux CI jobs have not run because the local work has not been authorized
-for commit/push. Record their reports and revisit the runtime decision if the
-full client misses its budget. A compiled client would also need separate
-packaging, daemon spawning, compatibility, and shell PTY validation before
-shipping; this stub is not a production binary.
+[CI run 37573150805](https://github.com/MiraiForge/prefaix/actions/runs/37573150805)
+is green on attempt 2 at committed
+`72d512bf1615d63ba0997c6c895a07725f551757`. The rerun recovered the macOS
+Node 24 PTY job interrupted by runner shutdown/exit 143; previously successful
+matrix jobs retain their original artifacts. This is **not** CI validation
+of subsequent implementation changes.
+
+Each runtime has 50 samples per variant, Bun 1.3.14, and one excluded warmup.
+macOS uses an Apple M1 virtual runner; Ubuntu uses native x64 cloud CPUs.
+CI load differs between jobs, so these are measured pairs, not a controlled
+comparison of Node releases.
+
+| Platform / Node | Node hello p50 / p95, ms | Compiled Bun hello p50 / p95, ms |
+|---|---|---|
+| macOS 15 / 22.23.2 | 57.10 / 80.77 | 49.62 / 68.70 |
+| macOS 15 / 24.20.0 | 36.66 / 57.89 | 24.53 / 63.20 |
+| macOS 15 / 26.10.0 | 33.62 / 42.98 | 21.91 / 40.03 |
+| Ubuntu 24.04 / 22.23.3 | 27.85 / 32.21 | 30.65 / 40.04 |
+| Ubuntu 24.04 / 24.21.0 | 19.97 / 23.53 | 22.78 / 26.92 |
+| Ubuntu 24.04 / 26.10.0 | 26.98 / 29.26 | 33.01 / 38.61 |
+
+The compiled stub is **63,446,114 bytes on macOS** and **94,582,912 bytes on
+Linux**; Node stubs are 322/270 bytes plus the installed runtime. None is a
+production compiled client.
+
+[Reviewed raw reports and original-file SHA-256 manifest](CI-37573150805.json)
+retain every sample and variant artifact hash for all six startup jobs and
+six separate production performance jobs. Original downloads are under
+`build/m3-validation/ci-37573150805/`. Production performance meets the
+timing/throughput gates on all six OS/runtime entries; see the latest
+[validation evidence](../VALIDATION.md#native-ci-evidence-2026-10-07).
+
+A future compiled client still needs independent packaging, daemon spawning,
+compatibility, and shell PTY validation. Revisit only if the full client misses
+its budget; these stub timings do not authorize shipping a compiled binary.

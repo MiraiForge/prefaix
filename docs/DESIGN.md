@@ -1,6 +1,6 @@
 # prefaix — Technical Design
 
-Status: **draft v0.1** (pre-implementation). Items marked **[spike Sn]** depend on a spike in [ROADMAP.md](ROADMAP.md) and may change.
+Status: **v0.1 design; M3 implementation under validation.** M1 spike decisions are linked below; remaining **[spike]** assumptions can still change. Implementation is not release acceptance.
 
 prefaix is a shell integration layer: type `: fix the failing test` at your normal prompt and an AI coding agent streams its work inline, keeps a sticky conversation per shell, and hands control back to the same prompt. It is modeled on Forge's shell plugin UX, but the agent is swappable. [pi](https://pi.dev) is the first backend.
 
@@ -220,7 +220,7 @@ Reading the NUL-delimited file uses builtins only:
 
 - Defines widget `prefaix-accept-line` and binds `^M`/`^J` in the `main`, `emacs`, `viins`, and `vicmd` keymaps. It re-binds after zsh-vi-mode initializes (`zvm_after_init_commands`), the same issue Forge hit.
 - Passthrough calls `zle accept-line`, not `.accept-line`, so other plugins' wrappers still run.
-- Hit path: `print -s -- $line` → `BUFFER=""` → `zle -I` → run the client → apply directives → either `zle accept-line` on the empty buffer (run class, so precmd re-runs) or set `BUFFER`/`CURSOR` and `zle reset-prompt` (edit class). **[spike S5]** Confirm there is no duplicate blank prompt line and that Forge's `BUFFERLINES` padding trick is unnecessary with an empty accept.
+- Hit path: `print -s -- $line` → `BUFFER=""` → `zle -I` → run the client → apply directives → either `zle accept-line` on the empty buffer (run class, so precmd re-runs) or set `BUFFER`/`CURSOR` and `zle reset-prompt` (edit class). [S5](spikes/S5-zsh-widget-coexistence.md) verifies the widget, named addon combination, and real p10k instant-prompt cache without additional `BUFFERLINES` padding.
 - Emits OSC 133 B/C/D around the turn when the terminal supports it (Ghostty, WezTerm, iTerm2, kitty, VS Code), because widget-dispatched commands bypass the terminal's own preexec markers. This is Forge's lesson about resize and reflow.
 - Right prompt: a precmd builtin read refreshes cached status; an escaped variable expansion prepends it to `RPROMPT` only if the user opts in. No command substitution runs during prompt draw. `ui.rprompt = "auto"` detects an existing `RPROMPT`, p10k, or starship and prints integration hints instead.
 - Context ring buffer: `preexec` records the command, and a *prepended* `precmd` records `$?` before themes overwrite it. It keeps the last N=10 entries in a zsh array.
@@ -252,7 +252,7 @@ bind    '"\C-j": "\C-x\C-_1\C-x\C-_2"'
   - **Run class:** step 2 stays `accept-line`. The empty line prints a fresh prompt and PROMPT_COMMAND runs.
   - **Edit class:** it sets `READLINE_LINE`/`READLINE_POINT` and re-binds step 2 to a no-op, so the suggestion waits for the user.
 - The bindings are installed in the `emacs`, `vi-insert`, and `vi-command` keymaps.
-- **[spike S4]** Verify on bash 4.4, 5.1, and 5.2 (macro plus dynamic re-bind timing, multi-line, `bind -x` tty handoff to a raw-mode child, and interaction with bash-preexec, atuin, and starship).
+- [S4](spikes/S4-bash-enter-macro.md) verifies 4.4/5.1/5.2, dynamic rebind, multiline/vi/history, raw-mode handoff, bash-preexec, and starship. Keep the 4.4 floor. Specific Atuin/fzf/mcfly releases remain broader addon validation, not measured by that probe.
 - Context: a `trap DEBUG` wrapper when bash-preexec is absent; bash-preexec's `preexec_functions` when present.
 - Right prompt: none in bash. The precmd hook refreshes `PREFAIX_STATUS` for direct variable expansion in PS1 without a subshell. `__prefaix_ps1` remains available as a builtin helper. The optional Starship custom-module snippet is outside the native zero-process prompt budget.
 
@@ -274,7 +274,7 @@ No `:` interception happens on 3.2.
 | Forge shell plugin (`forge zsh plugin`, `forge.fish`) | Both claim Enter and `:`. Doctor detects it in the rc or bindings and prints a migration note. The command mapping is in the README. |
 | zsh-autosuggestions / zsh-syntax-highlighting | Delegate via the wrapped `accept-line`. Load order is documented: prefaix loads before syntax-highlighting. |
 | zsh-vi-mode, fish vi mode, bash vi mode | Bind in all relevant keymaps; re-apply after zvm init. |
-| atuin, fzf key bindings, mcfly | These bind ↑ and Ctrl+R, not Enter. No conflict, but covered by e2e. |
+| atuin, fzf key bindings, mcfly | Usually bind ↑ and Ctrl+R rather than Enter. No direct version-specific coexistence claim; validate the user's binding configuration. |
 | starship, p10k, tide | Right-prompt integration hints and no clobbering. |
 | ble.sh | Unsupported in v1. Doctor warns. |
 
@@ -291,7 +291,7 @@ A short-lived process, one per interception. Its hot path imports only `client/*
 3. Collect context: cwd, filtered env (§7.2), recent commands, terminal size and color depth, and whether stdout is a TTY.
 4. Send the request. For turns, enter **tty mode**:
    - `setRawMode(true)` on `/dev/tty`, restored on every exit path (normal, error, signal, uncaught).
-   - **[spike S7]** Confirm libuv restores the *line editor's* termios, not plain cooked mode. If it doesn't, save and restore via `stty -g`.
+   - [S7](spikes/S7-raw-tty-widgets.md) observes exact inherited-mode restoration from actual widgets. Keep libuv restoration; no extra production `stty` subprocess is needed on the tested paths.
    - Key handling per §3.3, with an Esc-sequence disambiguation timeout of 25 ms so arrow keys aren't read as Esc.
    - SIGWINCH updates the renderer width.
 5. Render events (§4.2.1). Answer UI dialogs (§4.2.2).
@@ -415,10 +415,10 @@ interface TurnStartParams {
 | Rule | Detail |
 |---|---|
 | Binding | One child per active conversation, bound to its **root** and **env fingerprint**. |
-| Env change | If the next turn's env fingerprint differs (a new `PATH`, `VIRTUAL_ENV`, exported keys…), respawn the child on the same session (`--session <file>`). This costs about 0.8 s, and only when the env actually changed. |
+| Env change | If the next turn's env fingerprint differs (a new `PATH`, `VIRTUAL_ENV`, exported keys…), respawn the child on the same session (`--session <file>`). This costs a cold start only when the env actually changed; see [S2](spikes/S2-agent-pool-economics.md) for measured profiles. |
 | Capacity | `pool.max_children` (default 6) includes the optional spare and children opening or closing. Lifecycle mutations are serialized. Capacity pressure closes the least-recently-used idle child; if every child is busy, acquisition returns `CONVERSATION_BUSY`. |
 | Idle | A child idle for 15 min is closed by the daemon's existing 30-second sweep, even with clients connected. Startup, streaming, and finalization are protected. The spare expires too. |
-| Spare | After a turn, pre-warm **one spare** for the most recent (root, envHash) only when a capacity slot is free. Adopt it for a fresh conversation after applying title/model/thinking. Existing native transcripts and persona-bearing requests open their own child; persona restrictions apply at spawn. Every spare remains owned until adopted or closed. **[spike S2]** Measure real child RSS to validate defaults. |
+| Spare | After a turn, pre-warm **one spare** for the most recent (root, envHash) only when a capacity slot is free. Adopt it for a fresh conversation after applying title/model/thinking. Existing native transcripts and persona-bearing requests open their own child; persona restrictions apply at spawn. Every spare remains owned until adopted or closed. [S2](spikes/S2-agent-pool-economics.md) retains the six-child ceiling and optional spare: roughly 110 MiB marginal idle baseline for about 0.17 s saved. This is not a child RSS bound; lower capacity on constrained/extension-heavy machines. |
 | Crash | A child exiting mid-turn produces `settled {stopReason:"error"}` plus a notice. The next turn respawns with `--session <file>`. Three crashes within 60 s mark the conversation `degraded` and surface `prefaix doctor`. |
 
 #### 4.3.5 Conversation store
@@ -450,8 +450,8 @@ When a turn's `cwd` is **outside** the root, `workspace.cwd_policy` decides:
 
 | Policy | Behavior |
 |---|---|
-| `follow` | Respawn the child in the new root on the same session. **[spike S3]** Check which cwd pi's tools use after `--session <file>` from another directory, and whether the `cwd` prompt section updates. This becomes the default if S3 passes. |
-| `split` | Start (or resume) a separate conversation for the new root, with a notice: `↪ new conversation for ~/other (:c to switch back)`. `cd` back resumes the previous one. This is the default if S3 fails. |
+| `follow` | Respawn in the new root only when the backend supports it. [S3](spikes/S3-cwd-follow.md) finds that pi 1.0.4 restores the original tool/system cwd; its adapter clearly refuses cross-root resume before spawning. |
+| `split` | **Default.** Start (or resume) a separate conversation for the new root, with a notice: `↪ new conversation for ~/other (:c to switch back)`. `cd` back resumes the previous one. S3 requires this safe default for pi. |
 | `stay` | Keep the old root and just report the new cwd to the model. |
 
 ---
@@ -545,12 +545,13 @@ pi --mode rpc
    --session-id <native-id> | --session <file>      # create vs resume (see below)
    --name "<title>"                                  # visible in pi's own session picker
    -e <bundle>/pi-bridge.js                          # prefaix bridge extension
-   [--model <p/id>] [--thinking <lvl>] [--offline?]  # only if configured; else pi's defaults
+   [--provider <p>] [--model <p/id>] [--thinking <lvl>] [--offline?]  # only if configured; else pi's defaults
 cwd = root, env = shell env (filtered), stdio = pipes
 ```
 
 - **Create:** `--session-id pfx-<ULID>` gives a deterministic native id, and pi creates the session if it's missing. `sessionFile` is recorded after the first `get_state`.
-- **Resume:** `--session <sessionFile>`, which is robust across roots **[spike S3]**.
+- **Resume:** `--session <sessionFile>` within the original canonical root. [S3](spikes/S3-cwd-follow.md) rejects cross-root follow; session identity/history survive, but pi restores the header cwd.
+- **Offline:** not forced by default; [S2](spikes/S2-agent-pool-economics.md) finds too little baseline startup benefit to change the user's metadata/update behavior.
 - **Session storage** stays in pi's default `~/.pi/agent/sessions/` by default, so `pi --resume` and `:tui` see prefaix conversations. `agent.pi.session_dir` can isolate them.
 - **Readiness** means the first successful `get_state` response. `extension_ui_request` records can arrive **before** it (observed: `setWidget`/`setStatus` from pi-lens), and are buffered and applied.
 - **Shutdown:** close stdin, wait for exit, then escalate (§4.3.1).
@@ -621,7 +622,8 @@ A tiny pi extension, loaded with `-e`, that makes pi prefaix-aware without touch
   1. Before each `prompt`, the adapter writes `$RUNTIME/turns/<childPid>.json` (shell, cwd, recent commands, persona).
   2. On `before_agent_start` the extension reads the file and sets a `prefaix` system-prompt section (§7.1). pi records it as a section delta, so your **visible user message stays exactly what you typed**.
   3. Writes are sequential per child, so there is no race.
-- **Personas without respawn.** On a persona change it calls `pi.setActiveTools([...])` and patches a `persona` section. `:ask` means `read, grep, find, ls` plus the "answer, don't modify" guideline.
+- **Personas without respawn.** On a persona change it calls `pi.setActiveTools([...])` and patches a `persona` section. `:ask` means `read, grep, find, ls` plus the "answer, don't modify" guideline. [S9](spikes/S9-pi-bridge-extension.md) verifies native schema changes and restoration; capture the baseline at `session_start`, after runtime binding, not at extension load.
+- **Pre-ack UI.** Native extensions can request a dialog before prompt acknowledgment or `agent_start`. Consume events concurrently with acknowledgment, forwarding normalized UI without teaching the foreground pi schemas. S9 includes reviewed native UI replay; long-held/native unanswered-dialog cancellation remains separate hardening.
 - **`propose_command` tool (M4).** It is active only for `:suggest` and `:commit`. The model returns `{command, explanation}`. The tool result sets `terminate: true`, and the adapter turns the args into `set_buffer`. This produces structured output instead of scraping model prose.
 - **Fallback.** If the extension fails to load (the capability probe at spawn fails), context is prepended to the prompt text as a compact `<shell-context>` block and personas respawn with `--tools`.
 
@@ -1066,16 +1068,20 @@ Terminals tested manually per release: Ghostty, iTerm2, Terminal.app, WezTerm, k
 
 ---
 
-## 15. Open questions (tracked as spikes)
+## 15. M1 spike decisions
 
-| # | Question | Blocks |
+Resolved on the measured configurations; individual reports retain evidence
+limits. Broader compatibility, long-held native dialog hardening, and M3
+human/release acceptance are not implied by these decisions.
+
+| # | Evidence and decision | Area |
 |---|---|---|
-| S1 | Resolved for pi 1.0.4: live Kimi stream/abort/SIGKILL, controlled native retry/compaction, and ten reviewed replay fixtures. See S1's evidence boundaries. | Turn manager |
-| S2 | Child RSS; does `--offline` speed spawn without side effects; spare adoption via `get_state` | Pool defaults |
-| S3 | `--session <file>` from a different cwd: tool cwd and `cwd` section behavior | `cwd_policy` default |
-| S4 | bash macro plus dynamic rebind across 4.4/5.1/5.2 and vi mode | bash plugin |
-| S5 | zsh empty-accept refresh vs `reset-prompt`; zvm, autosuggest, and syntax-highlighting interplay | zsh plugin |
-| S6 | fish history append/merge semantics on 3.6 and 4.x; `repaint` vs execute-empty | fish plugin |
-| S7 | Raw mode inside widgets restores the line editor's termios; Esc timing | Client tty |
-| S8 | Client cold-start p50 on macOS and Linux | Packaging choice |
-| S9 | Bridge extension: `before_agent_start` section patching and `setActiveTools` from RPC mode | D9 / personas |
+| S1 | [Live/controlled native lifecycle](spikes/S1-pi-rpc-lifecycle.md): settlement, abort/retry/compaction, SIGKILL, and ten reviewed fixtures. | Turn manager |
+| S2 | [Pool economics](spikes/S2-agent-pool-economics.md): keep ceiling 6, optional one spare, and offline opt-in. | Pool defaults |
+| S3 | [Native resume](spikes/S3-cwd-follow.md): original cwd wins; default split, clearly refuse cross-root pi follow. | `cwd_policy` |
+| S4 | [Bash macro](spikes/S4-bash-enter-macro.md): retain dynamic rebind and 4.4 floor; 4.4/5.1/5.2 measured. | bash plugin |
+| S5 | [Zsh/addons](spikes/S5-zsh-widget-coexistence.md): empty accept vs reset-prompt, post-zvm rebind, real p10k cache; no extra padding. | zsh plugin |
+| S6 | [Fish](spikes/S6-fish-binding-history.md): literal history import/merge, identity abbreviation, empty execute vs repaint, right-prompt wrapping. | fish plugin |
+| S7 | [Raw tty](spikes/S7-raw-tty-widgets.md): exact inherited-mode restoration; no extra production stty subprocess. | Client tty |
+| S8 | [macOS/Linux startup](spikes/S8-client-startup.md): retain bundled Node; compiled stub does not justify a second path. | Packaging |
+| S9 | [Native bridge/UI](spikes/S9-pi-bridge-extension.md): retain sections and persona tools; runtime baseline and pre-ack UI fixes; eleventh reviewed fixture. | D9 / personas |

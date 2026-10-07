@@ -1,123 +1,95 @@
-# Spike S9 — pi bridge extension (`before_agent_start` section + `setActiveTools`)
+# S9: pi bridge, tool activation, and recorded extension UI
 
-**Status: load path verified, patch path not.** Everything reachable without
-sending a model request is recorded below; the two assertions that need a turn
-are listed at the end and are blocked on an allowed provider, not on effort.
+**Status: resolved, 2026-10-07.** D9 holds: use a separate system-prompt
+section and change persona tools without respawning. Preserve prepend/spawn
+fallbacks when the bridge is unavailable.
 
-- pi 0.87.1, macOS, spawned as `pi --mode rpc --offline --session-id … -e dist/pi-bridge.js`
-- Verified by running it, on 2026-09-29
-- Extension source: `src/agents/pi/bridge.ts`, bundled by tsup to `dist/pi-bridge.js`
+## Question and method
 
-## The question
+Can a bundled `-e` extension inject shell context without changing the visible
+user prompt, restore the native tool loadout after a persona, and surface native
+extension UI through RPC?
 
-Can a `-e` extension make pi take per-turn shell context as a **system-prompt
-section**, so the visible user message stays byte-for-byte what the user typed
-(D9, ADR 0004), and switch tools for a persona without a respawn?
+Earlier pi 0.87.1 evidence established loading and context/user-message behavior.
+The completed probe now runs actual installed **pi 1.0.4** against an isolated
+literal loopback HTTP/SSE API. Dummy credentials, guarded provider/model selection,
+isolated HOME/profiles, disabled user resources/background activity, and base-URL
+verification before prompts prevent a request to a real model endpoint.
 
-## The API, read from pi's own declarations
+`scripts/spikes/m1-native.ts` loads the production bridge and a trusted,
+probe-only `rpc-ui.ts` extension. It inspects actual API tool schemas,
+native transcripts, RPC order, and the adapter's normalized events. Replies,
+tool choices, and usage are **scripted**, not natural Kimi output.
 
-`BeforeAgentStartEvent` is the hook (from
-`@earendil-works/pi-coding-agent/dist/core/extensions/types.d.ts`):
+## Native results
 
-```ts
-interface BeforeAgentStartEvent {
-    type: "before_agent_start";
-    prompt: string;                                   // the visible user text
-    systemPromptOptions: NormalizedBuildSystemPromptOptions;  // mutable
-}
+[Complete native report](M1-native-pi1.0.4.json); original evidence is private
+under `build/spikes/M1-native-final-20261007/`.
+
+| Check | Observation |
+|---|---|
+| Context injection | `prefaix` section beside pi's sections, not a replacement |
+| Visible user messages | Byte-for-byte unchanged |
+| Read-only persona request | API offered only `read` |
+| Dropping persona | API offered `bash, read`, the actual initial loadout |
+| Subsequent ordinary/dialog turns | Same initial `bash, read` loadout |
+| Child identity | Same PID through the context/tool switches |
+| Native dialog | Select → notification → status → editor suggestion |
+| Timing | UI requests **before prompt acknowledgment and agent_start** |
+| Normalized adapter round trip | UI answered successfully; one final stop settlement |
+
+The bridge portion made **five loopback requests**, including one independent
+adapter verification turn; **zero remote model requests**. This does not claim
+that Kimi naturally generated those answers/tools or that zero stub prices
+measure coding-plan charges.
+
+## Bugs found and corrected
+
+1. **Tool baseline captured too early.** At extension load,
+   `getActiveTools()` can be unbound/empty. Refresh the baseline at
+   **session_start**, after runtime binding, and restore that loadout when
+   dropping a persona. Restoring an empty queued value is wrong.
+2. **Dialog before prompt acknowledgment.** Waiting for the acknowledgment
+   before consuming events deadlocks a `before_agent_start` dialog.
+   Consume concurrently, forward pre-start UI, race acknowledgment failure
+   and abort, and cancel abandoned queue reads so a later turn is not swallowed.
+
+The ready-file probe remains useful: after native readiness, the bundled bridge
+has either signaled loading or the adapter must use its fallback.
+
+## Reviewed replay evidence
+
+`test/fixtures/pi/recorded/bridge.jsonl` retains native event order and
+source `controlled`. It comes from raw `bridge.jsonl`, SHA-256
+`68079c1613a0cd81c606dc61227e80eeed5c1520ff573e8144dfc35e6db4c4d3`,
+half-open raw record range **[53, 70)** excluding the capture header.
+
+Regenerate into a new directory:
+
+```sh
+bun scripts/spikes/rpc-curate.ts --s9 <passed-native-directory> <new-output-directory>
 ```
 
-`NormalizedBuildSystemPromptOptions` carries `sections: Record<string, string>`
-(`dist/core/system-prompt.d.ts`). pi's own doc comment on that field is the
-answer to the whole design question:
+Curation retains UI payloads, normalized IDs, and the actual acknowledgment
+boundary. Explicit replay holds require a **fresh matching answer on every
+turn**; they are playback controls, not new native events. The recorded contract
+target now uses this dialog, while built-in tool examples remain supplemental.
 
-> Ordered system prompt sections, keyed by name. … every other section is
-> wrapped in a tag of the same name so the model can match later updates to it.
-> These become `SystemMessage.sections` in the transcript.
+Tests cover two dialog turns, ignored stale responses, unanswered-dialog replay
+abort, prompt rejection followed by success, tool-baseline restoration, and UI
+editor suggestions that do not execute.
 
-So `event.systemPromptOptions.sections.prefaix = "…"` is a first-class,
-diffable prompt section recorded in the transcript, and `event.prompt` is
-untouched. `pi.setActiveTools(names)` and `pi.getActiveTools()` are on
-`ExtensionAPI`, with the binding to the runtime deferred until after load
-("During initial extension load this call is queued").
+## Decision and evidence limits
 
-## Verified: the extension loads in RPC mode
+Keep D9 and personas-without-respawn when the bridge probe succeeds. Context
+files stay 0600 and are removed when read or when an abandoned turn ends.
+The opt-in live contract now guards before spawn, pins **both provider and
+model**, verifies native selection before prompting, and refuses conflicting
+overrides. Scripted tests validate that selection without a paid request.
 
-Spawned with `-e <bundle>` and the turns directory in `PREFAIX_BRIDGE_DIR`:
-
-| Check | Result |
-|---|---|
-| Extension loaded at all | **Yes.** The extension wrote `<turns>/<pi-pid>.ready` before `get_state` answered. |
-| Without `-e` | No ready file. The absence is therefore a real signal, not an artifact of the directory. |
-| `get_state` still answers | Yes, unchanged. |
-| Pre-ready `extension_ui_request` | Confirmed again: pi-lens pushed `setWidget` and `setStatus` records **before** the first reply. M2-4's pre-ready buffering is load-bearing. |
-| stdin EOF | Exit 0. |
-
-This is the whole basis of the capability probe: pi finishes loading
-extensions before it answers its first command, so by the time
-`PiSession.ready()` resolves the ready file is either there or never going to be.
-No polling window is needed, and a spawn whose bridge failed to load falls
-straight through to the prepend fallback.
-
-## Verified live, and verified not
-
-Run 2026-09-29 against `kimi-coding/kimi-for-coding` — the only pair
-authenticated in pi that `scripts/live-guard.ts` does not refuse. pi's own
-configured default is `openai-codex/gpt-6-sol`, which the guard refuses on
-purpose.
-
-Two of the three remaining assertions are now settled, against pi's own session
-file rather than the extension's account of itself:
-
-- **The `prefaix` section is a delta, not a replacement.** The system message's
-  `content` is the empty string and the context lives in `sections`, which has
-  `prefaix` alongside pi's own `preamble`, `tools`, `project_context`, `rules`,
-  `skills`, and `cwd`. Nothing of pi's was displaced; the `<prefaix>` block sits
-  next to it.
-- **The user message is untouched.** The single user record in the session JSONL
-  is byte for byte what the client sent, with no context block in front of it.
-  That is the entire reason the section path exists: under the prepend fallback
-  the model would read prefaix's context as though the user had typed it.
-
-The third is still unverified, and the reason is narrower than "no provider was
-available":
-
-- **`setActiveTools()` from inside the handler changes the tool set the model is
-  offered.** The live turn ran with no persona, so no tool switch happened and
-  there is nothing to observe. The handler's logic is unit-tested against a fake
-  pi, which proves the call is made in the right order but not that a real pi
-  honours it. Needs a live turn with a persona configured.
-
-`test/contract/live.test.ts` is the opt-in gate and it now asserts all of the
-above. It skips unless `PREFAIX_LIVE_PROVIDER` and `PREFAIX_LIVE_MODEL` name an
-allowed pair, and it finds the session file by the session id the adapter chose,
-so the assertions read the transcript the model actually saw.
-
-## Decision
-
-**D9 holds as designed.** The extension API supports exactly what the design
-assumed, so the section path is the default and prepending stays the fallback.
-
-Two refinements came out of this spike and are in the implementation:
-
-- **The probe is a file, not a timeout.** pi answers its first command only
-  after extensions load, so "did the bridge load" is answered by the ready
-  file's existence at that moment. A timer would have been a guess.
-- **The persona tool set is captured at load.** `setActiveTools` is queued
-  during load and applied after binding, so `getActiveTools()` inside the
-  factory is not the runtime truth. The bridge records pi's own tool set when
-  it loads and restores exactly that when a persona is dropped, rather than
-  restoring the queued value or guessing a default.
-
-## Consequences
-
-- `pi-bridge.js` ships inside the package and is loaded only through `-e`; the
-  user's pi configuration is never touched.
-- Context files are named `<turns>/<pi-pid>.json`, removed by the extension as
-  soon as it has read them, and written 0600 (DESIGN §10).
-- A persona change now takes effect on the next turn rather than immediately,
-  because the tool switch rides along with the turn's context. That is the
-  first moment it is observable, and it costs no respawn.
-- Compatibility with pi's extension API is a real dependency. `prefaix doctor`
-  and the pre-ready buffering around a failed load are what keep a pi upgrade
-  from becoming a broken turn.
+Successful **native** pre-ack UI is verified. Long-held human dialogs and
+**native** unanswered preflight cancellation are separate hardening work:
+an ordinary RPC deadline can expire during a dialog, and a replay's abort
+behavior does not prove pi cancels its pending UI hook. Those gaps are tracked
+in Beads; do not label synthetic/recorded cancellation as native evidence.
+This spike does not authorize a release or a new paid recording.

@@ -2,7 +2,7 @@
 
 Date: 2026-09-24
 
-Status: Proposed in design v0.1; pool defaults and cwd behavior await spikes S2/S3.
+Status: Accepted; pool/cwd decisions measured in S2/S3 on 2026-10-07.
 
 ## Context
 
@@ -45,7 +45,9 @@ Use a 0600 socket inside a 0700 runtime directory. A failed child ends its turn 
 an error; the next turn can resume its persisted session in a replacement child.
 
 [DESIGN §4.3](../DESIGN.md#43-daemon-prefaix-daemon) defines the lifecycle.
-[Spikes S2/S3](../ROADMAP.md#m1--spikes-45-d) must validate pool memory/spare
-adoption and session resumption from another cwd before fixing those defaults.
+[S2](../spikes/S2-agent-pool-economics.md) retains a six-child ceiling, optional
+one spare, and opt-in offline startup; agent RSS is separate from the daemon
+budget. [S3](../spikes/S3-cwd-follow.md) chooses **split** by default: native pi
+restores the original root on resume, so cross-root follow is refused.
 Later integration tests must cover concurrency, busy rejection, disconnect abort,
 environment-change respawn, idle exit, and stale-lock recovery.

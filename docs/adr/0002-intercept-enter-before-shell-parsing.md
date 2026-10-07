@@ -2,7 +2,7 @@
 
 Date: 2026-09-24
 
-Status: Proposed in design v0.1; shell and terminal mechanics await spikes S4–S7.
+Status: Accepted; S4–S7 native/PTY evidence recorded on 2026-10-07.
 
 ## Context
 
@@ -44,9 +44,10 @@ characters. The tradeoff is shell-specific keymap, history, repaint, and termina
 handoff code. Enter bindings must coexist with vi modes and other plugins; Forge's
 Enter interceptor is a conflict requiring migration guidance.
 
-bash 4.4+ is the proposed interception floor. macOS bash 3.2 instead gets `pfx`:
+bash 4.4+ is the measured interception floor. macOS bash 3.2 instead gets `pfx`:
 arguments use normal shell quoting, while the no-argument form reads a prompt.
 [DESIGN §4.1](../DESIGN.md#41-shell-plugins) specifies the shell contracts.
-[Spikes S4–S7](../ROADMAP.md#m1--spikes-45-d) must confirm binding, refresh,
-history, and raw-terminal behavior. The shared PTY suite must verify byte-exact
+[S4](../spikes/S4-bash-enter-macro.md), [S5](../spikes/S5-zsh-widget-coexistence.md),
+[S6](../spikes/S6-fish-binding-history.md), and [S7](../spikes/S7-raw-tty-widgets.md)
+record binding, refresh, history, addon, and exact raw-mode restoration evidence. The shared PTY suite must verify byte-exact
 prompts, builtin passthrough, normal commands, vi mode, typeahead, and tty recovery.

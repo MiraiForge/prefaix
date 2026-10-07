@@ -2,7 +2,7 @@
 
 Date: 2026-09-24
 
-Status: Proposed in design v0.1; RPC-mode extension behavior awaits spike S9.
+Status: Accepted; native pi 1.0.4 context/tool/UI evidence completed in S9.
 
 ## Context
 
@@ -42,13 +42,15 @@ and represent support through `AgentPort` capabilities.
 
 When supported, context stays separate from user text and persona changes reuse
 the warm process. Compatibility now depends on pi's extension APIs, so clean
-transcripts and persona switching without respawn remain unverified until
-[S9](../ROADMAP.md#m1--spikes-45-d). The fallback keeps context and personas usable
+transcripts and persona switching without respawn are measured in
+[S9](../spikes/S9-pi-bridge-extension.md). Capture the actual initial tool loadout
+at session_start, not the unbound extension-load value. The fallback keeps context and personas usable
 at the cost of transcript noise and respawns.
 
 Context files must be 0600 and deleted after `agent_start`; redact recent commands
 before they leave the client. Environment secrets stay out of the prompt.
 Read-only personas are a convenience, not a security boundary.
 [DESIGN §4.5.4](../DESIGN.md#454-bridge-extension-pi-bridgejs-shipped-inside-the-package)
-specifies the bridge. S9 must inspect RPC-mode session JSONL and active tools;
-implementation also needs fallback tests and the live-model guard for live tests.
+specifies the bridge. S9 inspects native transcripts, API tool schemas, and
+pre-ack extension UI. Fallback tests and guarded provider/model verification
+remain required; long-held native dialogs/cancellation are separate hardening.

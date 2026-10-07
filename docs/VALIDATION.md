@@ -3,6 +3,66 @@
 Beads epic `prefaix-mbd` owns the acceptance record. Passing local tests is not
 proof of Linux CI, a three-day user trial, or publication.
 
+## Native CI evidence: 2026-10-07
+
+[CI run 37573150805](https://github.com/MiraiForge/prefaix/actions/runs/37573150805)
+is **green, attempt 2**, at committed
+`72d512bf1615d63ba0997c6c895a07725f551757`. Attempt 1's macOS Node 24
+PTY job was interrupted by runner shutdown (exit 143), not a reported assertion.
+The rerun and required-check aggregator passed. All six check entries, four
+native shell/version entries, and six performance entries are successful;
+the optional pi no-model smoke was skipped.
+
+This supersedes older **pending Linux/S8 comparison** notes below, not their
+historical measurements. It validates that committed artifact, **not** the
+subsequent provider/usage/bridge/resume implementation. Required
+branch-check enforcement, frozen release-artifact stability, human acceptance,
+and publishing authorization are separate.
+
+[Reviewed raw CI reports and SHA-256 manifest](spikes/CI-37573150805.json)
+retain the original file hashes and every sample from all twelve
+startup/performance artifacts. Originals are under
+`build/m3-validation/ci-37573150805/`. All performance reports identify built
+artifact `270d6a4db692ea80840fee970e9a2865ef222f32ac1220b91a01c69ed71096f0`.
+
+Each production entry has 50 warm measured turns after one excluded warmup,
+then three 2,000-delta bursts. Post-use/post-burst RSS follows five seconds of
+quiescence. The backend is FakeAgent; **zero model requests**.
+
+| Platform / Node | Hello p50 / p95, ms | First token p50 / p95, ms | Fresh / post-use / post-burst RSS, MiB | Slowest burst deltas/s |
+|---|---|---|---|---|
+| macOS 15 / 22.23.2 | 57.95 / 87.60 | 94.68 / 133.03 | 44.56 / 47.11 / 48.05 | 10,672 |
+| macOS 15 / 24.20.0 | 37.53 / 45.12 | 64.84 / 76.59 | 48.45 / 51.59 / 52.34 | 16,990 |
+| macOS 15 / 26.10.0 | 38.56 / 44.07 | 67.13 / 76.32 | 53.88 / **58.44 / 59.06** | 16,710 |
+| Ubuntu 24.04 / 22.23.3 | 39.54 / 42.98 | 60.05 / 187.26 | 50.34 / 52.33 / 53.27 | 18,196 |
+| Ubuntu 24.04 / 24.21.0 | 27.45 / 31.30 | 45.66 / 49.28 | 50.46 / 53.74 / 54.34 | 26,322 |
+| Ubuntu 24.04 / 26.10.0 | 42.00 / 44.40 | 61.67 / 64.11 | 51.64 / 55.89 / 55.90 | 17,618 |
+
+Every timing/throughput gate passes: hello p50 <60ms/p95 <120ms, first-token
+**p50** <100ms, and >1,000 deltas/s. First-token p95 is reported, not subject
+to an invented <100ms gate. macOS Node 26 post-use/post-burst RSS exceeds
+60,000,000 bytes (57.22MiB) and is honestly **allowlisted**, not physically
+under budget. The other entries, including Ubuntu Node 26, pass the RSS limit.
+
+[S8](spikes/S8-client-startup.md) now resolves the packaging decision using
+native macOS/Linux paired stub results: retain bundled Node. A compiled Bun
+stub is slower on Linux and does not repair daemon RSS.
+
+The subsequent [M1 native report](spikes/M1-native-pi1.0.4.json) and S2–S9
+writeups distinguish controlled native pi, replay, and shell/TTY evidence.
+A native successful pre-ack dialog is verified; long-held native dialog
+timeout/cancellation remains separate hardening. Neither the matrix rerun nor
+new local probes substitute for the required human trial or authorize release.
+
+The subsequent implementation also passes a separate local Linux Node
+26.10.0 production gate (50 measured turns): hello p50/p95 **32.31/37.20ms**,
+first token p50 **50.36ms**, slowest burst **25,933 deltas/s**, and fresh/
+post-use/post-burst RSS **49.00/53.86/54.62MiB**, with no memory exception.
+Its artifact hash is
+`8e6761e5c0b93db1b12c4371598908f75f49731a51ffc95d8f907e8fd01c754e`;
+raw report: `build/m3-validation/final-local-performance.json`. This local
+pass does not make the old committed CI artifact validate the new source.
+
 ## Automated gates
 
 Run `bun run check`, `bun run coverage`, `bun run test:e2e`, `bun run test:perf`,
@@ -91,7 +151,7 @@ major 26 only: all RSS measurements remain in the report, and over-budget
 results are labeled `idleMemoryBudget.status = "allowlisted"`. Every timing and
 throughput assertion and other runtime memory budget stays enforced. Invalid
 RSS samples fail even on Node 26. This approved exception removes the Node 26
-RSS blocker; M3-12 still needs Linux evidence. A diagnostic forced collection
+RSS blocker; Linux measurements are now available in the 2026-10-07 evidence above. A diagnostic forced collection
 reduced live heap but did not reduce RSS; the overrun cannot be attributed
 solely to retained replay data. No forced collection or diagnostic runtime
 override is shipped. Normal-command and prompt-draw process budgets are

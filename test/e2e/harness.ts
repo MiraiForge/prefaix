@@ -167,6 +167,8 @@ export interface SessionOptions {
   readonly cwd?: string;
   readonly env?: Record<string, string>;
   readonly timeoutMs?: number;
+  /** An explicit marker matcher for native theme probes, including right prompts. */
+  readonly promptPattern?: RegExp;
   /** Overrides the shell binary, for a shell that is somewhere else. */
   readonly bin?: string;
 }
@@ -234,6 +236,7 @@ export class ShellSession {
   readonly #dir: string;
   readonly #shell: ShellKind;
   readonly #timeoutMs: number;
+  readonly #promptPattern: RegExp;
   readonly #exited: Promise<void>;
   #closed = false;
   #output = "";
@@ -245,12 +248,14 @@ export class ShellSession {
     dir: string,
     shell: ShellKind,
     timeoutMs: number,
+    promptPattern: RegExp,
   ) {
     this.#terminal = terminal;
     this.#child = child;
     this.#dir = dir;
     this.#shell = shell;
     this.#timeoutMs = timeoutMs;
+    this.#promptPattern = promptPattern;
     this.#exited = new Promise<void>((resolve) => {
       child.onExit(() => resolve());
     });
@@ -310,6 +315,7 @@ export class ShellSession {
       dir,
       options.shell,
       options.timeoutMs ?? 8_000,
+      options.promptPattern ?? /^__pfx$/u,
     );
     terminal.onData((data) => child.write(data));
     child.onData((data: string) => {
@@ -457,7 +463,7 @@ export class ShellSession {
   #promptRow(): number {
     const buffer = this.#terminal.buffer.active;
     const row = buffer.baseY + buffer.cursorY;
-    if (this.#rowText(row).trim() === PROMPT) return row;
+    if (this.#promptPattern.test(this.#rowText(row).trim())) return row;
     return -1;
   }
 

@@ -1,0 +1,565 @@
+{
+  "format": "prefaix-m1-native-report",
+  "source": "controlled",
+  "provider": "kimi-coding",
+  "model": "kimi-coding/k3",
+  "piVersion": "1.0.4",
+  "recordedAt": "2026-10-07T15:37:06.547Z",
+  "platform": "linux",
+  "arch": "x64",
+  "driver": "v26.3.0",
+  "samples": 20,
+  "remoteModelRequests": 0,
+  "status": "passed",
+  "s2": {
+    "measurements": [
+      {
+        "sample": 0,
+        "variant": "offline",
+        "readyMs": 166.548573,
+        "idleRssBytes": 116064256
+      },
+      {
+        "sample": 0,
+        "variant": "metadata-online",
+        "readyMs": 182.359425,
+        "idleRssBytes": 118808576
+      },
+      {
+        "sample": 0,
+        "variant": "bridge",
+        "readyMs": 184.75219399999992,
+        "idleRssBytes": 116834304
+      },
+      {
+        "sample": 1,
+        "variant": "bridge",
+        "readyMs": 180.43846599999995,
+        "idleRssBytes": 117202944
+      },
+      {
+        "sample": 1,
+        "variant": "metadata-online",
+        "readyMs": 178.60489500000006,
+        "idleRssBytes": 119652352
+      },
+      {
+        "sample": 1,
+        "variant": "offline",
+        "readyMs": 168.88876499999992,
+        "idleRssBytes": 116932608
+      },
+      {
+        "sample": 2,
+        "variant": "offline",
+        "readyMs": 174.42612400000007,
+        "idleRssBytes": 115781632
+      },
+      {
+        "sample": 2,
+        "variant": "metadata-online",
+        "readyMs": 174.1482699999999,
+        "idleRssBytes": 119136256
+      },
+      {
+        "sample": 2,
+        "variant": "bridge",
+        "readyMs": 183.32188199999996,
+        "idleRssBytes": 117362688
+      },
+      {
+        "sample": 3,
+        "variant": "bridge",
+        "readyMs": 177.2936279999999,
+        "idleRssBytes": 117043200
+      },
+      {
+        "sample": 3,
+        "variant": "metadata-online",
+        "readyMs": 179.59651200000008,
+        "idleRssBytes": 120291328
+      },
+      {
+        "sample": 3,
+        "variant": "offline",
+        "readyMs": 171.62838600000032,
+        "idleRssBytes": 116187136
+      },
+      {
+        "sample": 4,
+        "variant": "offline",
+        "readyMs": 175.81863799999974,
+        "idleRssBytes": 115761152
+      },
+      {
+        "sample": 4,
+        "variant": "metadata-online",
+        "readyMs": 190.50028500000008,
+        "idleRssBytes": 119164928
+      },
+      {
+        "sample": 4,
+        "variant": "bridge",
+        "readyMs": 172.12847899999997,
+        "idleRssBytes": 117215232
+      },
+      {
+        "sample": 5,
+        "variant": "bridge",
+        "readyMs": 176.79978600000004,
+        "idleRssBytes": 116649984
+      },
+      {
+        "sample": 5,
+        "variant": "metadata-online",
+        "readyMs": 181.5231920000001,
+        "idleRssBytes": 119873536
+      },
+      {
+        "sample": 5,
+        "variant": "offline",
+        "readyMs": 168.6194330000003,
+        "idleRssBytes": 116371456
+      },
+      {
+        "sample": 6,
+        "variant": "offline",
+        "readyMs": 173.53430799999978,
+        "idleRssBytes": 116629504
+      },
+      {
+        "sample": 6,
+        "variant": "metadata-online",
+        "readyMs": 171.11844599999995,
+        "idleRssBytes": 119853056
+      },
+      {
+        "sample": 6,
+        "variant": "bridge",
+        "readyMs": 169.02889400000004,
+        "idleRssBytes": 117133312
+      },
+      {
+        "sample": 7,
+        "variant": "bridge",
+        "readyMs": 171.86127299999998,
+        "idleRssBytes": 116764672
+      },
+      {
+        "sample": 7,
+        "variant": "metadata-online",
+        "readyMs": 180.10887000000002,
+        "idleRssBytes": 118894592
+      },
+      {
+        "sample": 7,
+        "variant": "offline",
+        "readyMs": 163.153276,
+        "idleRssBytes": 115527680
+      },
+      {
+        "sample": 8,
+        "variant": "offline",
+        "readyMs": 171.30805399999917,
+        "idleRssBytes": 116473856
+      },
+      {
+        "sample": 8,
+        "variant": "metadata-online",
+        "readyMs": 184.0428840000004,
+        "idleRssBytes": 119115776
+      },
+      {
+        "sample": 8,
+        "variant": "bridge",
+        "readyMs": 172.39009999999962,
+        "idleRssBytes": 116875264
+      },
+      {
+        "sample": 9,
+        "variant": "bridge",
+        "readyMs": 175.71894499999962,
+        "idleRssBytes": 116793344
+      },
+      {
+        "sample": 9,
+        "variant": "metadata-online",
+        "readyMs": 193.3049799999999,
+        "idleRssBytes": 120455168
+      },
+      {
+        "sample": 9,
+        "variant": "offline",
+        "readyMs": 172.73382299999957,
+        "idleRssBytes": 116920320
+      },
+      {
+        "sample": 10,
+        "variant": "offline",
+        "readyMs": 165.02068800000052,
+        "idleRssBytes": 116523008
+      },
+      {
+        "sample": 10,
+        "variant": "metadata-online",
+        "readyMs": 176.68073800000002,
+        "idleRssBytes": 119681024
+      },
+      {
+        "sample": 10,
+        "variant": "bridge",
+        "readyMs": 181.56839900000068,
+        "idleRssBytes": 115679232
+      },
+      {
+        "sample": 11,
+        "variant": "bridge",
+        "readyMs": 182.47528299999976,
+        "idleRssBytes": 116056064
+      },
+      {
+        "sample": 11,
+        "variant": "metadata-online",
+        "readyMs": 187.63093899999967,
+        "idleRssBytes": 120279040
+      },
+      {
+        "sample": 11,
+        "variant": "offline",
+        "readyMs": 168.44386300000042,
+        "idleRssBytes": 115412992
+      },
+      {
+        "sample": 12,
+        "variant": "offline",
+        "readyMs": 166.7689100000007,
+        "idleRssBytes": 116948992
+      },
+      {
+        "sample": 12,
+        "variant": "metadata-online",
+        "readyMs": 177.77784599999995,
+        "idleRssBytes": 119660544
+      },
+      {
+        "sample": 12,
+        "variant": "bridge",
+        "readyMs": 181.141576,
+        "idleRssBytes": 115818496
+      },
+      {
+        "sample": 13,
+        "variant": "bridge",
+        "readyMs": 181.62779000000046,
+        "idleRssBytes": 117243904
+      },
+      {
+        "sample": 13,
+        "variant": "metadata-online",
+        "readyMs": 170.44273299999986,
+        "idleRssBytes": 118464512
+      },
+      {
+        "sample": 13,
+        "variant": "offline",
+        "readyMs": 167.62812600000052,
+        "idleRssBytes": 117092352
+      },
+      {
+        "sample": 14,
+        "variant": "offline",
+        "readyMs": 162.45126700000037,
+        "idleRssBytes": 117161984
+      },
+      {
+        "sample": 14,
+        "variant": "metadata-online",
+        "readyMs": 183.1193119999998,
+        "idleRssBytes": 118120448
+      },
+      {
+        "sample": 14,
+        "variant": "bridge",
+        "readyMs": 176.95631199999843,
+        "idleRssBytes": 116359168
+      },
+      {
+        "sample": 15,
+        "variant": "bridge",
+        "readyMs": 183.40486899999996,
+        "idleRssBytes": 118018048
+      },
+      {
+        "sample": 15,
+        "variant": "metadata-online",
+        "readyMs": 173.7239609999997,
+        "idleRssBytes": 118153216
+      },
+      {
+        "sample": 15,
+        "variant": "offline",
+        "readyMs": 169.2950810000002,
+        "idleRssBytes": 116867072
+      },
+      {
+        "sample": 16,
+        "variant": "offline",
+        "readyMs": 165.62104499999987,
+        "idleRssBytes": 116834304
+      },
+      {
+        "sample": 16,
+        "variant": "metadata-online",
+        "readyMs": 170.00161300000036,
+        "idleRssBytes": 118960128
+      },
+      {
+        "sample": 16,
+        "variant": "bridge",
+        "readyMs": 175.24698999999964,
+        "idleRssBytes": 116502528
+      },
+      {
+        "sample": 17,
+        "variant": "bridge",
+        "readyMs": 174.598473,
+        "idleRssBytes": 117039104
+      },
+      {
+        "sample": 17,
+        "variant": "metadata-online",
+        "readyMs": 173.47664599999916,
+        "idleRssBytes": 119701504
+      },
+      {
+        "sample": 17,
+        "variant": "offline",
+        "readyMs": 163.02935799999977,
+        "idleRssBytes": 116715520
+      },
+      {
+        "sample": 18,
+        "variant": "offline",
+        "readyMs": 169.62802199999896,
+        "idleRssBytes": 117108736
+      },
+      {
+        "sample": 18,
+        "variant": "metadata-online",
+        "readyMs": 181.83978600000046,
+        "idleRssBytes": 119005184
+      },
+      {
+        "sample": 18,
+        "variant": "bridge",
+        "readyMs": 178.32798100000036,
+        "idleRssBytes": 117030912
+      },
+      {
+        "sample": 19,
+        "variant": "bridge",
+        "readyMs": 178.36024999999972,
+        "idleRssBytes": 117796864
+      },
+      {
+        "sample": 19,
+        "variant": "metadata-online",
+        "readyMs": 184.59836300000097,
+        "idleRssBytes": 117981184
+      },
+      {
+        "sample": 19,
+        "variant": "offline",
+        "readyMs": 167.85067499999968,
+        "idleRssBytes": 117424128
+      }
+    ],
+    "adoption": {
+      "samePid": true,
+      "sameSessionId": true,
+      "sameSessionFile": true,
+      "idleRssBytes": 115662848,
+      "afterTurnRssBytes": 119173120,
+      "turn": {
+        "recordStart": 7,
+        "recordEnd": 22,
+        "events": [
+          "agent_start",
+          "turn_start",
+          "message_start",
+          "message_end",
+          "message_start",
+          "message_end",
+          "message_start",
+          "message_update:text_start",
+          "message_update:text_delta",
+          "message_update:text_end",
+          "message_end",
+          "turn_end",
+          "agent_end",
+          "agent_settled"
+        ],
+        "stopReasons": ["stop"],
+        "settledCount": 1
+      }
+    },
+    "apiRequests": 1
+  },
+  "s3": {
+    "sameSessionId": true,
+    "sameSessionFile": true,
+    "historyPreserved": true,
+    "bashCwd": "A",
+    "relativeRead": "S3_FROM_A",
+    "latestCwdSection": "A",
+    "decision": "split",
+    "originalHeaderCwd": "A",
+    "apiRequests": 3,
+    "turn": {
+      "recordStart": 3,
+      "recordEnd": 36,
+      "events": [
+        "agent_start",
+        "turn_start",
+        "message_start",
+        "message_end",
+        "message_start",
+        "message_update:toolcall_start",
+        "message_update:toolcall_delta",
+        "message_update:toolcall_end",
+        "message_update:toolcall_start",
+        "message_update:toolcall_delta",
+        "message_update:toolcall_end",
+        "message_end",
+        "tool_execution_start",
+        "tool_execution_start",
+        "tool_execution_update",
+        "tool_execution_update",
+        "tool_execution_end",
+        "tool_execution_end",
+        "message_start",
+        "message_end",
+        "message_start",
+        "message_end",
+        "turn_end",
+        "turn_start",
+        "message_start",
+        "message_update:text_start",
+        "message_update:text_delta",
+        "message_update:text_end",
+        "message_end",
+        "turn_end",
+        "agent_end",
+        "agent_settled"
+      ],
+      "stopReasons": ["toolUse", "stop"],
+      "settledCount": 1
+    }
+  },
+  "s9": {
+    "samePid": true,
+    "userMessagesUnchanged": true,
+    "toolSets": [
+      ["read"],
+      ["bash", "read"],
+      ["bash", "read"],
+      ["bash", "read"]
+    ],
+    "sectionBesidePi": true,
+    "nativeUiRoundTrip": true,
+    "apiRequests": 5,
+    "turns": [
+      {
+        "recordStart": 2,
+        "recordEnd": 17,
+        "events": [
+          "agent_start",
+          "turn_start",
+          "message_start",
+          "message_end",
+          "message_start",
+          "message_end",
+          "message_start",
+          "message_update:text_start",
+          "message_update:text_delta",
+          "message_update:text_end",
+          "message_end",
+          "turn_end",
+          "agent_end",
+          "agent_settled"
+        ],
+        "stopReasons": ["stop"],
+        "settledCount": 1
+      },
+      {
+        "recordStart": 19,
+        "recordEnd": 34,
+        "events": [
+          "agent_start",
+          "turn_start",
+          "message_start",
+          "message_end",
+          "message_start",
+          "message_end",
+          "message_start",
+          "message_update:text_start",
+          "message_update:text_delta",
+          "message_update:text_end",
+          "message_end",
+          "turn_end",
+          "agent_end",
+          "agent_settled"
+        ],
+        "stopReasons": ["stop"],
+        "settledCount": 1
+      },
+      {
+        "recordStart": 36,
+        "recordEnd": 51,
+        "events": [
+          "agent_start",
+          "turn_start",
+          "message_start",
+          "message_end",
+          "message_start",
+          "message_end",
+          "message_start",
+          "message_update:text_start",
+          "message_update:text_delta",
+          "message_update:text_end",
+          "message_end",
+          "turn_end",
+          "agent_end",
+          "agent_settled"
+        ],
+        "stopReasons": ["stop"],
+        "settledCount": 1
+      },
+      {
+        "recordStart": 53,
+        "recordEnd": 70,
+        "events": [
+          "extension_ui_request",
+          "extension_ui_request",
+          "extension_ui_request",
+          "extension_ui_request",
+          "agent_start",
+          "turn_start",
+          "message_start",
+          "message_end",
+          "message_start",
+          "message_update:text_start",
+          "message_update:text_delta",
+          "message_update:text_end",
+          "message_end",
+          "turn_end",
+          "agent_end",
+          "agent_settled"
+        ],
+        "stopReasons": ["stop"],
+        "settledCount": 1
+      }
+    ],
+    "adapterUiRoundTrip": true
+  }
+}

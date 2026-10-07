@@ -19,6 +19,7 @@
     "spike:client-startup": "node scripts/spikes/client-startup.ts",
     "spike:rpc-live": "bun scripts/spikes/rpc-live.ts",
     "spike:rpc-controlled": "bun scripts/spikes/rpc-controlled.ts",
+    "spike:m1-native": "bun scripts/spikes/m1-native.ts",
     "test:flake": "bun run build && node scripts/flake.mjs",
     "test:pi-smoke": "bun run build && bun scripts/pi-smoke.ts",
     "check:private": "node scripts/check-private.mjs",
