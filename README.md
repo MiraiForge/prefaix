@@ -17,21 +17,28 @@ but **0.1.0 has not shipped**.
 | Milestone | Status | Finished | Remaining |
 |---|---|---|---|
 | **M0 — Foundations** | Complete | Strict TypeScript tooling, builds, CI, architecture/ADRs, layering checks, and private-package safeguards. | Ongoing maintenance. |
-| **M1 — Design spikes** | Partially verified | [S1: pi RPC lifecycle](docs/spikes/S1-pi-rpc-lifecycle.md), including stream/continuation, abort, retry/compaction ordering, shutdown/kill behavior, and ten reviewed replay fixtures. | S2–S9: pool economics, cross-directory resume, shell/plugin coexistence, raw tty behavior, cold-start comparison, and bridge/tool-activation evidence, including recorded extension UI. |
-| **M2 — Core** | Complete | Backend-independent AgentPort, fake and pi adapters, bridge, daemon/pool/store, foreground client, safe directives, renderer, CLI, and contract tests. | Follow-up hardening, including cumulative pi usage/cache-cost accounting and explicit provider pinning in the opt-in live bridge test. |
-| **M3 — Triple-shell MVP → 0.1.0** | Implemented; acceptance in progress | zsh/fish/bash plugins, bash 3.2 fallback, MVP commands, pickers, prompt status, doctor, setup/uninstall, docs, and automated validation gates. | Cross-platform/version acceptance, stability and performance evidence, human walkthrough/daily-use checks, release preparation, and explicit publishing approval. |
+| **M1 — Design spikes** | Complete for measured decisions | S1 lifecycle; S2 pool economics; S3 safe cwd policy; S4–S7 shell/addon/tty mechanics; S8 macOS/Linux startup; S9 bridge/tools/UI. Eleven reviewed native pi fixtures. | Broader terminal/addon versions and long-held native dialog/cancellation hardening; these do not become verified merely because replay passes. |
+| **M2 — Core** | Complete | Backend-independent AgentPort, fake and pi adapters, bridge, daemon/pool/store, foreground client, safe directives, renderer, CLI, and contracts; cumulative usage/cache-cost accounting, verified live provider/model selection, and resume/bridge/UI fixes. | Ongoing hardening, including long-held native dialog timeout/cancellation. |
+| **M3 — Triple-shell MVP → 0.1.0** | Implemented; acceptance in progress | zsh/fish/bash plugins, bash 3.2 fallback, MVP commands, pickers, prompt status, doctor, setup/uninstall, docs, and passing macOS/Linux shell/version and performance CI at `72d512b`. | Fresh release-artifact CI/stability, human walkthrough/daily-use checks, required-check enforcement, release preparation, and explicit publishing approval. |
 | **M4 — Parity and beyond Forge** | Planned | Foundations from the core and MVP. | Command suggestions and commit drafting, detach/attach, steering, personas, completions, TUI handoff, additional conversation commands, richer context capture, and terminal polish. |
 | **M5 — Hardening → 1.0** | Planned | Backend abstraction and safety checks to build on. | A second adapter and backend switching, security review, wider distribution/docs site, WSL/terminal validation, and conditional compiled-client/ble.sh work. |
 
-S1 combines real Kimi turns for streaming/abort/kill with actual pi processes
-against a **controlled loopback API** for retry/compaction. Those controlled
-cases are not evidence of natural provider failures. Other spike evidence and
-the overall M1 exit gate remain open even though M2 is complete.
+[S1](docs/spikes/S1-pi-rpc-lifecycle.md) combines real Kimi turns with native pi
+against a **controlled loopback API** for retry/compaction. [S2](docs/spikes/S2-agent-pool-economics.md),
+[S3](docs/spikes/S3-cwd-follow.md), and [S9](docs/spikes/S9-pi-bridge-extension.md)
+use controlled native probes, not natural provider measurements. Shell/TTY
+[S4](docs/spikes/S4-bash-enter-macro.md), [S5](docs/spikes/S5-zsh-widget-coexistence.md),
+[S6](docs/spikes/S6-fish-binding-history.md), [S7](docs/spikes/S7-raw-tty-widgets.md),
+and the cross-platform [S8](docs/spikes/S8-client-startup.md) now have written
+results and decisions. M1 decisions do not replace M3 human/release acceptance.
 
 **Next: finish the 0.1.0 acceptance and release gates.**
 
-- Complete the supported shell/version matrix on macOS and Linux, the 50-rerun
-  stability gate, and performance measurements on both platforms.
+- Keep supported-shell/version and performance CI green for the release
+  artifact. [CI at 72d512b](docs/VALIDATION.md#native-ci-evidence-2026-10-07)
+  is green on both platforms. That recorded run does not validate later changes:
+  require a green run for the new commits and fresh frozen-artifact stability
+  evidence before release acceptance.
 - Confirm a clean daily-driver doctor result, a fresh-machine README walkthrough,
   and three days of daily use on at least two shells without tty corruption or
   lost typeahead.
@@ -43,6 +50,25 @@ The [detailed roadmap](docs/ROADMAP.md) defines tasks and acceptance criteria;
 the [validation guide](docs/VALIDATION.md) and [release gate](docs/RELEASE.md)
 define the remaining evidence. Beads remains the live task source of truth;
 this section is a public progress summary, not a separate task tracker.
+
+### Local validation snapshot
+
+The completed M1/hardening changes passed these local gates on **2026-10-07**:
+
+| Gate | Result and scope |
+|---|---|
+| `bun run check` | Lint/typecheck/unit and contract tests: **1,818 passed**, 10 expected broken-backend failures, 10 opt-in skips. |
+| `bun run coverage` | **97.74% statements / 95.60% branches / 95.89% functions / 98.07% lines**; all exceed 95%. |
+| Shell PTY suites | **134 passed** on each Linux floor/current pair; complete bash 5.1/5.2 suites **60 passed each**. Optional terminal/platform cases stay labeled as skips. |
+| Build and `test:pi-smoke` | Distributable bundles build; real pi **1.0.4** answers offline RPC queries, idle abort, and shutdown without a prompt, model request, or credentials. |
+| `test:perf` | Built client/daemon with **FakeAgent**: hello p50/p95 **32.31/37.20ms**, first-token p50 **50.36ms**, about **25,933 deltas/s**; maximum idle daemon RSS **54.62MiB**, below the **57.22MiB** budget. |
+| Docs/package/style guards | Generated config reference matches the schema; `private: true` remains set; formatting and diff-whitespace checks pass. |
+
+These gates do not establish real-provider latency or credential validity,
+constitute a comprehensive security/secrets audit, prove long-held native UI
+cancellation, or replace the human release trial. The new evidence collection
+used fake/replay or controlled loopback APIs: **no paid model requests**.
+Full methods, artifacts, and evidence limits are in [the validation guide](docs/VALIDATION.md).
 
 ## Install from source
 
@@ -58,8 +84,9 @@ npm install --global .
 ```
 
 Install and configure pi using its [installation instructions](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent).
-Prefaix tests against pi 0.87.1 or newer. Authenticate with your preferred
-provider and choose a model in pi before your first real prompt.
+The minimum supported pi is 0.87.1; current native lifecycle/bridge evidence
+uses pi 1.0.4. Authenticate with your preferred provider and choose a model in
+pi before your first real prompt.
 
 Add **one** line to your shell's rc file, then open a new shell:
 
@@ -169,12 +196,15 @@ setting and environment override. Run `prefaix config check` after editing
 picker = "builtin"
 
 [workspace]
-cwd_policy = "follow"
+cwd_policy = "split" # pi resumes in the original session cwd; split is safe across roots.
 ```
 
-A conversation is rooted at a project directory. `follow` moves the agent to
-the new root, `split` selects a separate conversation per root, and `stay` keeps
-the original root.
+A conversation is rooted at a project directory. **`split` is the default**
+and selects a separate conversation per root; `stay` keeps the original root.
+`follow` requires backend support. Pi 1.0.4 restores its original session cwd,
+so the adapter refuses cross-root resume rather than silently running tools in
+the wrong directory. Same-root resume, including canonical/symlink aliases,
+remains supported.
 
 | Symptom | Action |
 |---|---|
