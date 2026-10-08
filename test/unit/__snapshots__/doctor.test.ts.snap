@@ -62,7 +62,7 @@ exports[`handles shell command errors without outputting their error 1`] = `
 
 exports[`hides probe exceptions 1`] = `
 "✗ pi was not found or could not be inspected.
-  Fix: Install @mariozechner/pi-coding-agent and put pi on PATH, or set agent.pi.bin.
+  Fix: Install @earendil-works/pi-coding-agent and put pi on PATH, or set agent.pi.bin.
 "
 `;
 
@@ -161,7 +161,7 @@ exports[`reports invalid config without including values or source text 1`] = `
 
 exports[`reports missing pi 1`] = `
 "✗ pi was not found or could not be inspected.
-  Fix: Install @mariozechner/pi-coding-agent and put pi on PATH, or set agent.pi.bin.
+  Fix: Install @earendil-works/pi-coding-agent and put pi on PATH, or set agent.pi.bin.
 "
 `;
 

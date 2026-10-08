@@ -154,7 +154,7 @@ async function piChecks(
         id: "pi",
         status: "error",
         message: "pi was not found or could not be inspected.",
-        fix: "Install @mariozechner/pi-coding-agent and put pi on PATH, or set agent.pi.bin.",
+        fix: "Install @earendil-works/pi-coding-agent and put pi on PATH, or set agent.pi.bin.",
       },
     ];
   }
