@@ -204,7 +204,7 @@ export class PiSession implements AgentSession {
   }
 
   get isAlive(): boolean {
-    return !this.#rpc.exited;
+    return !this.#rpc.exited && !this.#rpc.closing;
   }
 
   get busy(): boolean {
@@ -283,12 +283,21 @@ export class PiSession implements AgentSession {
 
       // Whatever pi wrote before its first reply is startup output, not an
       // abandoned turn, so it is mapped into this turn rather than discarded.
-      for (const record of this.#rpc.takeStartupRecords()) {
+      const startup = new Set(this.#rpc.takeStartupRecords());
+      for (const record of startup) {
         for (const event of mapper.map(record)) {
           yield event;
         }
       }
 
+      if (turn.aborted) {
+        if (this.#rpc.waitingForUi || this.#rpc.closing) {
+          await this.#rpc.terminate();
+          this.#clearReadyFile();
+        }
+        yield mapper.settle("aborted");
+        return;
+      }
       const message = this.#compose(input);
       // before_agent_start can request a dialog BEFORE acknowledging prompt.
       // Read concurrently or neither pi nor the foreground can make progress.
@@ -311,6 +320,10 @@ export class PiSession implements AgentSession {
           // on a settle this build cannot prove arrives. The abandoned read is
           // cancelled first, or it would swallow the next turn's first record.
           await iterator.return?.();
+          if (this.#rpc.waitingForUi || this.#rpc.closing) {
+            await this.#rpc.terminate();
+            this.#clearReadyFile();
+          }
           yield mapper.settle("aborted");
           return;
         }
@@ -320,6 +333,9 @@ export class PiSession implements AgentSession {
           return;
         }
         const record = step.value;
+        // Readiness also queued these records for raw RPC consumers. They were
+        // already mapped above; don't ask a startup question a second time.
+        if (startup.delete(record)) continue;
         if (!started) {
           if (record.type !== "agent_start") {
             if (record.type === "extension_ui_request") {
@@ -339,6 +355,10 @@ export class PiSession implements AgentSession {
       }
     } catch (cause) {
       const message = messageOf(cause);
+      if (this.#rpc.closing || (turn.aborted && this.#rpc.waitingForUi)) {
+        await this.#rpc.terminate();
+        this.#clearReadyFile();
+      }
       if (turn.aborted) {
         yield mapper.settle("aborted");
         return;
@@ -427,7 +447,15 @@ export class PiSession implements AgentSession {
   async abort(): Promise<void> {
     // The local turn is released first. If pi is alive but unresponsive, waiting
     // on its replies would hold the user's prompt for the sum of both timeouts.
+    const heldDialog = this.#rpc.waitingForUi;
     this.#turnAbort?.abort();
+    if (heldDialog) {
+      // pi's abort does not release an extension's unanswered dialog. Do not
+      // send a cancellation answer that could launch the remaining preflight.
+      await this.#rpc.terminate();
+      this.#clearReadyFile();
+      return;
+    }
     // Queued text is restored into the buffer rather than dropped, so the
     // user's half-typed text survives the abort. This is best effort, and must
     // not delay the release above.
@@ -467,9 +495,7 @@ export class PiSession implements AgentSession {
         : "cancelled" in response
           ? { cancelled: true as const }
           : { confirmed: response.confirmed };
-    this.#rpc.writeRaw(
-      `${JSON.stringify({ type: "extension_ui_response", id: piId, ...payload })}\n`,
-    );
+    this.#rpc.respondUi(piId, payload);
   }
 
   async state(): Promise<AgentState> {

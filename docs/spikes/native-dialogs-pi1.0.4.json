@@ -1,0 +1,131 @@
+{
+  "format": "prefaix-native-dialog-report",
+  "source": "controlled",
+  "status": "passed",
+  "provider": "kimi-coding",
+  "model": "kimi-coding/k3",
+  "piVersion": "1.0.4",
+  "recordedAt": "2026-10-08T04:02:17.336Z",
+  "platform": "linux",
+  "parentNode": "v26.3.0",
+  "parentBun": "1.4.2",
+  "stimulus": {
+    "api": "loopback-stub",
+    "remoteModelRequests": 0,
+    "scriptedUsage": true
+  },
+  "requestTimeoutMs": 500,
+  "dialogHoldMs": 1500,
+  "turns": [
+    {
+      "text": "Answer after holding the dialog.",
+      "heldMs": 1505.677152,
+      "loopbackRequests": 1,
+      "settledCount": 1,
+      "stopReason": "stop",
+      "child": 1,
+      "childAlive": true
+    },
+    {
+      "text": "Abort the unanswered dialog by signal.",
+      "heldMs": 1502.897056,
+      "loopbackRequests": 0,
+      "settledCount": 1,
+      "stopReason": "aborted",
+      "child": 1,
+      "childAlive": false
+    },
+    {
+      "text": "Recover on the same conversation.",
+      "heldMs": 1500.684803,
+      "loopbackRequests": 1,
+      "settledCount": 1,
+      "stopReason": "stop",
+      "child": 2,
+      "childAlive": true
+    },
+    {
+      "text": "Abort the unanswered dialog by method.",
+      "heldMs": 1502.8082169999998,
+      "loopbackRequests": 0,
+      "settledCount": 1,
+      "stopReason": "aborted",
+      "child": 2,
+      "childAlive": false
+    },
+    {
+      "text": "Recover again after method abort.",
+      "heldMs": 1503.0477359999995,
+      "loopbackRequests": 1,
+      "settledCount": 1,
+      "stopReason": "stop",
+      "child": 3,
+      "childAlive": true
+    },
+    {
+      "text": "Silent preflight must never start after timeout.",
+      "heldMs": 0,
+      "loopbackRequests": 0,
+      "settledCount": 1,
+      "stopReason": "error",
+      "child": 3,
+      "childAlive": false
+    },
+    {
+      "text": "Recover after silent preflight timeout.",
+      "heldMs": 1504.75634,
+      "loopbackRequests": 1,
+      "settledCount": 1,
+      "stopReason": "stop",
+      "child": 4,
+      "childAlive": true
+    }
+  ],
+  "nativeConversationPreserved": true,
+  "confirmedNativeChildExits": 3,
+  "loopbackRequests": 4,
+  "remoteModelRequests": 0,
+  "transcriptRecords": 13,
+  "transcriptUserMessages": [
+    "Answer after holding the dialog.",
+    "Recover on the same conversation.",
+    "Recover again after method abort.",
+    "Recover after silent preflight timeout."
+  ],
+  "abortedOrTimedOutUserMessages": 0,
+  "abortStrategy": "terminate held-dialog child; resume native conversation on replacement",
+  "artifacts": [
+    {
+      "path": "scripts/spikes/dialogs-native.ts",
+      "sha256": "6ee0886d8bcec53a4fcb7155b2d0f44eaf402ce708972760cc40b66ed8b266d4"
+    },
+    {
+      "path": "src/agents/pi/adapter.ts",
+      "sha256": "2458324be84e3fe80092ca83f59e3e0b58e3ab4f77d040908f4f63d6fd4ca3fd"
+    },
+    {
+      "path": "src/agents/pi/rpc.ts",
+      "sha256": "5425c75ca5e53f86922853dc1d5bc7a30b1c1b4e94ce7aec26a7459a5c1e8310"
+    },
+    {
+      "path": "summary.json",
+      "sha256": "2148738b13acfee9a13f879cea070938643779098dc7f85acce70254d1da1ba3"
+    },
+    {
+      "path": "dialogs.jsonl",
+      "sha256": "89e3e0bbc60b660e47ff5db34c71044673a00f4bad6ae924c11fa5b49d64d411"
+    },
+    {
+      "path": "dialogs.trace.jsonl",
+      "sha256": "932fbfb691043b95a520b4bc7449096f3f71ed009c49ccb540c73db14273c14c"
+    },
+    {
+      "path": "api-requests.json",
+      "sha256": "4d271d092c134999d029bc05065f139c27778ab9756d6f9664f31f062bdaabf0"
+    },
+    {
+      "path": "sessions/2026-10-08T04-02-17-473Z_pfx-01M4CTT6KXK6EVH746N4423NHD.jsonl",
+      "sha256": "c22e36f6d1bfcacd07aec3a8d4afddc88e855854d012e7348b831513badc0cc1"
+    }
+  ]
+}

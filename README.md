@@ -10,15 +10,15 @@ yet.** See the [release gate](docs/RELEASE.md), [design](docs/DESIGN.md), and
 
 ## Roadmap
 
-Progress snapshot as of **2026-10-07**. Implementation and release acceptance
+Progress snapshot as of **2026-10-08**. Implementation and release acceptance
 are separate: the core is complete and the triple-shell MVP is implemented,
 but **0.1.0 has not shipped**.
 
 | Milestone | Status | Finished | Remaining |
 |---|---|---|---|
 | **M0 — Foundations** | Complete | Strict TypeScript tooling, builds, CI, architecture/ADRs, layering checks, and private-package safeguards. | Ongoing maintenance. |
-| **M1 — Design spikes** | Complete for measured decisions | S1 lifecycle; S2 pool economics; S3 safe cwd policy; S4–S7 shell/addon/tty mechanics; S8 macOS/Linux startup; S9 bridge/tools/UI. Eleven reviewed native pi fixtures. | Broader terminal/addon versions and long-held native dialog/cancellation hardening; these do not become verified merely because replay passes. |
-| **M2 — Core** | Complete | Backend-independent AgentPort, fake and pi adapters, bridge, daemon/pool/store, foreground client, safe directives, renderer, CLI, and contracts; cumulative usage/cache-cost accounting, verified live provider/model selection, and resume/bridge/UI fixes. | Ongoing hardening, including long-held native dialog timeout/cancellation. |
+| **M1 — Design spikes** | Complete for measured decisions | S1 lifecycle; S2 pool economics; S3 safe cwd policy; S4–S7 shell/addon/tty mechanics; S8 macOS/Linux startup; S9 bridge/tools/UI. Eleven reviewed native pi fixtures. | Broader terminal/addon versions; the separate controlled native dialog hardening is now verified on pi 1.0.4, not merely inferred from replay. |
+| **M2 — Core** | Complete | Backend-independent AgentPort, fake and pi adapters, bridge, daemon/pool/store, foreground client, safe directives, renderer, CLI, and contracts; cumulative usage/cache-cost accounting, verified live provider/model selection, and resume/bridge/UI fixes. | Ongoing hardening and wider compatibility. Long-held pi 1.0.4 dialogs now use paused acceptance deadlines and safe child replacement on abort. |
 | **M3 — Triple-shell MVP → 0.1.0** | Implemented; acceptance in progress | zsh/fish/bash plugins, bash 3.2 fallback, MVP commands, pickers, prompt status, doctor, setup/uninstall, docs, and passing macOS/Linux shell/version and performance CI at `72d512b`. | Fresh release-artifact CI/stability, human walkthrough/daily-use checks, required-check enforcement, release preparation, and explicit publishing approval. |
 | **M4 — Parity and beyond Forge** | In progress | Built-in/custom personas and `:plan` → `:go`, with native tool/transcript verification. | Command suggestions and commit drafting, detach/attach, steering, completions, TUI handoff, additional conversation commands, richer context capture, and terminal polish. |
 | **M5 — Hardening → 1.0** | Planned | Backend abstraction and safety checks to build on. | A second adapter and backend switching, security review, wider distribution/docs site, WSL/terminal validation, and conditional compiled-client/ble.sh work. |
@@ -32,13 +32,21 @@ use controlled native probes, not natural provider measurements. Shell/TTY
 and the cross-platform [S8](docs/spikes/S8-client-startup.md) now have written
 results and decisions. M1 decisions do not replace M3 human/release acceptance.
 
+[Long-held native dialog evidence](docs/spikes/native-dialogs.md) now verifies
+answer, signal/method abort, silent preflight timeout, and native conversation
+recovery. Aborts terminate the held-dialog child rather than claiming pi cancels
+its pending hook gracefully.
+
 **Next: finish the 0.1.0 acceptance and release gates.**
 
 - Keep supported-shell/version and performance CI green for the release
   artifact. [CI at 72d512b](docs/VALIDATION.md#native-ci-evidence-2026-10-07)
   is green on both platforms. That recorded run does not validate later changes:
   require a green run for the new commits and fresh frozen-artifact stability
-  evidence before release acceptance.
+  evidence before release acceptance. The subsequent latest-main run at
+  `e2aaa27` failed a busy-turn test and macOS Node 22 timing budgets;
+  [the local follow-up](docs/VALIDATION.md#ci-and-native-dialog-follow-up-2026-10-08)
+  is not yet fresh green CI.
 - Confirm a clean daily-driver doctor result, a fresh-machine README walkthrough,
   and three days of daily use on at least two shells without tty corruption or
   lost typeahead.
@@ -65,8 +73,9 @@ The completed M1/hardening changes passed these local gates on **2026-10-07**:
 | Docs/package/style guards | Generated config reference matches the schema; `private: true` remains set; formatting and diff-whitespace checks pass. |
 
 These gates do not establish real-provider latency or credential validity,
-constitute a comprehensive security/secrets audit, prove long-held native UI
-cancellation, or replace the human release trial. The new evidence collection
+constitute a comprehensive security/secrets audit, prove graceful native hook
+cancellation, or replace the human release trial. The separate controlled
+pi 1.0.4 dialog evidence above verifies safe termination and conversation recovery. The new evidence collection
 used fake/replay or controlled loopback APIs: **no paid model requests**.
 Full methods, artifacts, and evidence limits are in [the validation guide](docs/VALIDATION.md).
 

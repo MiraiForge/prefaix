@@ -560,10 +560,10 @@ cwd = root, env = shell env (filtered), stdio = pipes
 
 #### 4.5.2 RPC transport
 
-About 300 lines, in-house:
+An in-house transport with an injectable child seam:
 
 - `StringDecoder` plus LF-only splitting, with a trailing `\r` stripped.
-- Request correlation by `id`, with per-command timeouts (default 10 s; `prompt` resolves on *accept*, and completion is `agent_settled`).
+- Request correlation by `id`, with per-command timeouts (default 10 s; `prompt` resolves on *accept*, and completion is `agent_settled`). Supported unanswered extension dialogs pause only prompt acceptance; the ordinary deadline restarts after the last answer/extension-owned timeout. Readiness and metadata keep their deadlines. A timed-out unacknowledged prompt terminates its owned child to prevent late preflight/model work.
 - stderr is captured to the log.
 - Unexpected exit rejects every pending request and produces `settled(error)` for the running turn.
 
@@ -626,7 +626,7 @@ A tiny pi extension, loaded with `-e`, that makes pi prefaix-aware without touch
   3. Writes are sequential per child, so there is no race.
 - **Personas without respawn.** On a persona change it calls `pi.setActiveTools([...])` and patches a `persona` section. `:ask` means `read, grep, find, ls` plus the "answer, don't modify" guideline. [S9](spikes/S9-pi-bridge-extension.md) verifies native schema changes and restoration; capture the baseline at `session_start`, after runtime binding, not at extension load.
 - **Restoration.** Leaving a persona (`:go`) or switching to a guideline-only persona restores the runtime baseline, including user extension tools. The daemon persists persona selection and a completed-plan marker. It resolves retained persona/native state under turn ownership and invalidates the old marker before fallible backend acquisition; `:go` checks the current marker, never infers a plan from an older cached answer. [M4 native evidence](spikes/M4-personas.md) verifies actual tool schemas and transcript deltas through the adapter/pool.
-- **Pre-ack UI.** Native extensions can request a dialog before prompt acknowledgment or `agent_start`. Consume events concurrently with acknowledgment, forwarding normalized UI without teaching the foreground pi schemas. S9 includes reviewed native UI replay; long-held/native unanswered-dialog cancellation remains separate hardening.
+- **Pre-ack UI.** Native extensions can request a dialog before prompt acknowledgment or `agent_start`. Consume events concurrently with acknowledgment, forwarding normalized UI without teaching the foreground pi schemas. S9 includes reviewed native UI replay; [separate pi 1.0.4 native hardening](spikes/native-dialogs.md) verifies long-held questions, safe abort, and recovery. An unanswered-dialog abort terminates the owned child and resumes its native conversation on a replacement; it does not claim RPC `abort` releases the extension's pending hook.
 - **`propose_command` tool (M4).** It is active only for `:suggest` and `:commit`. The model returns `{command, explanation}`. The tool result sets `terminate: true`, and the adapter turns the args into `set_buffer`. This produces structured output instead of scraping model prose.
 - **Fallback.** If the extension fails to load (the capability probe at spawn fails), context is prepended to the prompt text as a compact `<shell-context>` block and personas respawn with `--tools`. A persona-bearing spawn does not narrow tools before a configured bridge captures its baseline; if that bridge fails, restart once with spawn-time restrictions before sending any prompt. A warm child's unsupported switch likewise respawns on its native handle. If a live bridge instead loses per-turn context delivery, refuse the prompt and settle locally with an error; prose-only fallback cannot enforce tool restrictions or restoration.
 
@@ -636,7 +636,7 @@ A tiny pi extension, loaded with `-e`, that makes pi prefaix-aware without touch
 |---|---|
 | prompt | `prompt {message}` |
 | steer (M4) | `steer` / `prompt {streamingBehavior:"steer"}` |
-| abort | `clear_queue` → `abort` (queued text is restored into the buffer directive) |
+| abort | Normally `clear_queue` → `abort` (queued text is restored into the buffer directive); an unanswered extension dialog requires terminating the owned child and resuming on a replacement. |
 | `:model` | `get_available_models`, `set_model` |
 | `:think` | `get_available_thinking_levels`, `set_thinking_level` |
 | `:info` | `get_state`, `get_session_stats` |
@@ -1074,8 +1074,10 @@ Terminals tested manually per release: Ghostty, iTerm2, Terminal.app, WezTerm, k
 ## 15. M1 spike decisions
 
 Resolved on the measured configurations; individual reports retain evidence
-limits. Broader compatibility, long-held native dialog hardening, and M3
-human/release acceptance are not implied by these decisions.
+limits. Broader compatibility and M3 human/release acceptance are not implied
+by these decisions. [Separate native pi 1.0.4 dialog hardening](spikes/native-dialogs.md)
+now verifies safe cancellation by child termination and conversation recovery,
+not graceful cancellation of arbitrary extension hooks.
 
 | # | Evidence and decision | Area |
 |---|---|---|

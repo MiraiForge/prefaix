@@ -148,8 +148,10 @@ that basis.
 - Allan has used it daily for 3 days on at least two shells, with no tty corruption and no lost typeahead.
 
 M3 feature implementation and its automated gates are present; acceptance is
-still in progress. Allan approved a Node 26 idle-memory exception; Linux and
-human acceptance evidence remain required.
+still in progress. Allan approved a Node 26 idle-memory exception. Historical
+macOS/Linux CI at `72d512b` passed; latest-main `e2aaa27` failed the busy-turn
+fixture and macOS Node 22 budgets. Local follow-up fixes do not establish fresh
+CI acceptance. Required-check enforcement and human acceptance remain required.
 The [validation guide](VALIDATION.md) describes the native version
 matrix, stability runs, and performance method, and the
 [release gate](RELEASE.md) separates local evidence from Linux CI, required-check
@@ -182,6 +184,13 @@ isolated loopback API verifies tool schemas, transcript tool deltas, normal-tool
 restoration, and unchanged visible user messages without respawning.
 [Evidence and reproduction](spikes/M4-personas.md). This local M4 implementation
 does not satisfy the remaining M3 human/release gates or authorize publication.
+
+**Core hardening state (2026-10-08):** [native pi 1.0.4 long-held dialog
+verification](spikes/native-dialogs.md) now covers deadlines, signal/method abort,
+and silent preflight timeout without orphaned requests. Safe abort terminates
+the owned child and resumes its native conversation on a replacement. This is
+not graceful native hook cancellation or a waiver of the M3 gate; the other
+M4 groups remain dependency-blocked on M3 CI acceptance.
 
 ## M5 — Hardening → 1.0 (ongoing)
 

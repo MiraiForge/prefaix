@@ -3,6 +3,84 @@
 Beads epic `prefaix-mbd` owns the acceptance record. Passing local tests is not
 proof of Linux CI, a three-day user trial, or publication.
 
+## CI and native dialog follow-up: 2026-10-08
+
+Latest-main [CI run 37719207492](https://github.com/MiraiForge/prefaix/actions/runs/37719207492)
+failed at `e2aaa27`. Ubuntu Node 22 coverage let the busy fake turn finish
+before Ctrl+C (exit 0 instead of 130). macOS 15 Node 22 reported hello p50
+**67.87ms** and first-token p50 **115.80ms**, exceeding the unchanged <60ms and
+<100ms budgets. Its required-check aggregate consequently failed. The older
+green run below does not supersede this failure.
+
+The local candidate replaces elapsed-time ownership in that test with a gated
+real FakeSession prompt, released only by the actual `turn.abort` acknowledgment.
+Normal and 2,000ms metadata delays pass; removing the gate reproduces the same
+0-versus-130 failure. The package now builds one standalone foreground ESM
+module while retaining lazy split daemon/adapter bundles. Warm unchanged
+conversation/native/persona state avoids redundant fsyncs, but changed handles,
+root/title/persona, and executable-plan invalidation remain durable before any
+prompt/backend side effect. Regression tests enforce lazy initialization,
+standalone execution, and the durability boundaries.
+
+Linux Node 22.23.3 candidate measurements retained all 50 samples and the
+original budgets: hello p50/p95 **26.52/29.99ms**, first-token p50/p95
+**43.63/46.70ms**. A whole-application unsplit experiment was slower and was
+rejected. The retained report is
+`build/ci-e2aaa27-performance/local-node22-foreground-noop.json`; it predates the
+separate dialog hardening below. Linux results are not native macOS validation
+or proof that latest-main CI is repaired.
+
+[Separate actual pi 1.0.4 native dialog evidence](spikes/native-dialogs.md)
+reproduces the old 500ms prompt deadline during a 1,500ms human question and
+verifies the correction: pause acceptance, retain metadata deadlines, hard-stop
+an unanswered-dialog child on signal/method abort, and resume its native
+conversation. A silent 2,000ms preflight is also terminated at the ordinary
+500ms deadline, with zero late requests. Seven turns make four scripted local
+API requests, **zero remote requests**, and exactly one settlement each. Actual
+PID disappearance and native transcript/state are checked; only the four
+successful user messages enter the transcript. This is safe termination and
+replacement, not graceful hook cancellation or arbitrary extension sandboxing.
+
+Current local gates:
+
+- Full check: **1,911 passed**, 10 deliberate expected contract failures,
+  10 optional skips.
+- Explicit Linux Node 22.23.3 full coverage: **97.83% statements, 95.76%
+  branches, 96.04% functions, 98.16% lines**; all enforced 95% thresholds pass.
+- Full shell PTY suite: **125 passed**, 19 optional skips on the available
+  Linux shell versions.
+- Eighteen scripted dialog/deadline/lifecycle regressions and six cost-guard
+  refusal cases run without invoking native pi or a model. The guarded native
+  evidence is captured separately under `build/spikes/dialogs-native-guarded-final/`.
+
+The final candidate also passes a fresh Linux Node 22.23.3 production performance
+run: hello p50/p95 **27.33/32.78ms**, first-token p50/p95 **44.54/49.52ms**,
+slowest burst **32,476 deltas/s**, and maximum idle RSS **56.17MiB**, physically
+below the 57.22MiB budget without an exception. All 50 samples are retained in
+`build/ci-e2aaa27-performance/local-node22-ci-dialog-final.json`.
+
+Two frozen local sweeps each pass **50/50**, 72 cases per repeat, **7,200 test
+passes** total, with four workers each, zero retries/omitted failures, and every
+log audited. Available shells are zsh 5.9.2, fish 4.9.3, and bash 5.3.20, not the
+CI floor/version pairs. The first sweep used a Node 22 parent but default
+Node 26.10.0 CLI/test workers; its report's `node` field identifies only the
+parent. The second explicitly prepended Node 22.23.3 to PATH for all workers.
+Raw evidence is `build/flake-ci-native-dialogs{,-node22}/`. Both sweeps and the
+final performance report identify artifact
+`a999ab1c6f2965b3270546cce10e8bb55a78d36763263159c193a39207fa6406`;
+the stability source/test/dependency fingerprint is
+`ceaac29e2ba3b2320e673c0cde8922903943e172cb2f9609af887949e76cb43d`.
+These local sweeps are not frozen release-artifact acceptance across the full
+supported OS/version matrix. The recorder uses local Bun 1.4.2 rather than
+CI's pinned 1.3.14; native and performance runtime scopes remain explicit.
+
+`main` remains unprotected: a fresh read-only branch-protection query returns
+404 and the repository ruleset list is empty. No commit/push, remote policy
+change, tag, publishing, deployment, or paid recording is implied by this local
+work. Fresh exact-commit CI, required-check enforcement, frozen release-artifact
+stability across all supported OS/version entries, human doctor/walkthrough/
+three-day trial, and explicit release approval remain distinct gates.
+
 ## Native CI evidence: 2026-10-07
 
 [CI run 37573150805](https://github.com/MiraiForge/prefaix/actions/runs/37573150805)

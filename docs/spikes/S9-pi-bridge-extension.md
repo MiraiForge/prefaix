@@ -87,9 +87,10 @@ The opt-in live contract now guards before spawn, pins **both provider and
 model**, verifies native selection before prompting, and refuses conflicting
 overrides. Scripted tests validate that selection without a paid request.
 
-Successful **native** pre-ack UI is verified. Long-held human dialogs and
-**native** unanswered preflight cancellation are separate hardening work:
-an ordinary RPC deadline can expire during a dialog, and a replay's abort
-behavior does not prove pi cancels its pending UI hook. Those gaps are tracked
-in Beads; do not label synthetic/recorded cancellation as native evidence.
-This spike does not authorize a release or a new paid recording.
+Successful **native** pre-ack UI is verified by this spike. Its original
+long-held/cancellation gap is now addressed by the [separate 2026-10-08 native
+hardening probe](native-dialogs.md): paused prompt-acceptance deadlines, safe
+termination of an unanswered-dialog child, and recovery on the native
+conversation. This does **not** assert RPC abort gracefully releases pi's
+pending UI hook, and replay remains replay. Neither probe authorizes a release
+or a paid recording.
