@@ -36,7 +36,11 @@ export async function runCli(
   version: string = cliVersion(),
 ): Promise<ExitCode> {
   if (argv[0] === "run") {
-    const { runClient } = await import("./run.js");
+    const { runClient } = import.meta.url.endsWith("/src/cli/bin.ts")
+      ? await import("./run.js")
+      : ((await import(
+          new URL("./client.js", import.meta.url).href
+        )) as typeof import("./run.js"));
     return runClient({ argv: argv.slice(1), version });
   }
   const { main } = await import("./index.js");

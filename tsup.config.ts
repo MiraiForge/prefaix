@@ -1,5 +1,5 @@
 import { existsSync, rmSync } from "node:fs";
-import { defineConfig } from "tsup";
+import { defineConfig, type Options } from "tsup";
 
 export default defineConfig(() => {
   const entry = Object.fromEntries(
@@ -15,17 +15,32 @@ export default defineConfig(() => {
     return [];
   }
 
-  return {
-    entry,
+  // Clean once before either build starts; per-build cleaning can delete
+  // another configuration's output while tsup runs them concurrently.
+  rmSync("dist", { recursive: true, force: true });
+  const common: Options = {
     format: ["esm"],
     platform: "node",
     target: "node22",
     outDir: "dist",
     outExtension: () => ({ js: ".js" }),
     sourcemap: true,
-    splitting: true,
     minify: true,
     noExternal: ["smol-toml"],
-    clean: true,
+    clean: false,
   };
+  return [
+    { ...common, entry, splitting: true },
+    ...(existsSync("src/cli/run.ts")
+      ? [
+          {
+            ...common,
+            // One cacheable foreground module, without pulling daemon/adapters
+            // into it or resolving a graph of shared chunks on every shell turn.
+            entry: { client: "src/cli/run.ts" },
+            splitting: false,
+          },
+        ]
+      : []),
+  ];
 });

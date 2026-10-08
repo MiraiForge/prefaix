@@ -108,6 +108,53 @@ describe("conversation personas", () => {
     expect((await daemon.store.get(first.conversationId))?.persona).toBe("ask");
   });
 
+  it.each(["split", "follow", "stay"] as const)(
+    "does not rewrite already durable warm state under %s policy",
+    async (cwdPolicy) => {
+      await start({ workspace: { ...defaultConfig().workspace, cwdPolicy } });
+      const first = await turn({ persona: "ask" });
+      const updates = vi.spyOn(daemon.store, "update");
+      try {
+        await turn({ conversationId: first.conversationId });
+        // Only the new outcome needs a durable write. Startup has no title,
+        // root, executable-plan, native-handle, or persona change to commit.
+        expect(updates.mock.calls).toHaveLength(1);
+        expect(updates.mock.calls[0]?.[1]).toMatchObject({
+          planReady: false,
+          stats: { turns: 2 },
+        });
+        expect(session(first.conversationId).persona?.name).toBe("ask");
+      } finally {
+        updates.mockRestore();
+      }
+    },
+  );
+
+  it.each(["sessionId", "sessionFile"] as const)(
+    "persists a changed native %s before prompting",
+    async (field) => {
+      await start();
+      const first = await turn();
+      const active = session(first.conversationId);
+      const expected = { ...active.native, [field]: "new-native-handle" };
+      Object.assign(active.native, expected);
+      const observed: unknown[] = [];
+      const prompt = active.prompt.bind(active);
+      const watching = vi
+        .spyOn(active, "prompt")
+        .mockImplementation(async function* (input, signal) {
+          observed.push((await daemon.store.get(first.conversationId))?.native);
+          yield* prompt(input, signal);
+        });
+      try {
+        await turn({ conversationId: first.conversationId });
+        expect(observed).toEqual([expected]);
+      } finally {
+        watching.mockRestore();
+      }
+    },
+  );
+
   it("switches custom and built-in personas in the same native conversation, and clears explicitly", async () => {
     await start({
       personas: {

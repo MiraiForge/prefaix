@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -61,6 +62,66 @@ describe("application bundles", () => {
     const result = build(cwd);
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(existsSync(join(cwd, "dist"))).toBe(false);
+  });
+
+  it("builds a standalone foreground module and keeps dispatch initialization lazy", () => {
+    const cwd = workspace();
+    mkdirSync(join(cwd, "src/cli"), { recursive: true });
+    writeFileSync(
+      join(cwd, "src/cli/bin.ts"),
+      readFileSync(join(root, "src/cli/bin.ts")),
+    );
+    writeFileSync(
+      join(cwd, "src/cli/daemon-runtime.ts"),
+      "export function prepareDaemonRuntime() { return undefined; }\n",
+    );
+    writeFileSync(
+      join(cwd, "src/cli/index.ts"),
+      'export async function main() { console.log("main fixture"); return 0; }\n',
+    );
+    writeFileSync(
+      join(cwd, "src/cli/foreground-dependency.ts"),
+      'console.log("foreground initialized"); export const marker = "foreground fixture";\n',
+    );
+    writeFileSync(
+      join(cwd, "src/cli/run.ts"),
+      'import {marker} from "./foreground-dependency.js"; export async function runClient() { console.log(marker); return 0; }\n',
+    );
+    const result = build(cwd);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(existsSync(join(cwd, "dist/client.js"))).toBe(true);
+    expect(existsSync(join(cwd, "dist/client.js.map"))).toBe(true);
+    const invoke = (args: string[]) =>
+      spawnSync(process.execPath, [join(cwd, "dist/prefaix.js"), ...args], {
+        encoding: "utf8",
+      });
+    const help = invoke(["--help"]);
+    expect(help.status, help.stderr).toBe(0);
+    expect(help.stdout.trim()).toBe("main fixture");
+    const run = invoke(["run"]);
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout.trim()).toBe(
+      "foreground initialized\nforeground fixture",
+    );
+    // A wrapper which still imports shared chunks cannot pass this: the
+    // foreground entry remains runnable after every other output is removed.
+    for (const file of readdirSync(join(cwd, "dist"))) {
+      if (file !== "client.js" && file !== "client.js.map")
+        rmSync(join(cwd, "dist", file), { force: true });
+    }
+    const isolated = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        'const {runClient} = await import("./dist/client.js"); await runClient();',
+      ],
+      { cwd, encoding: "utf8" },
+    );
+    expect(isolated.status, isolated.stderr).toBe(0);
+    expect(isolated.stdout.trim()).toBe(
+      "foreground initialized\nforeground fixture",
+    );
   });
 
   it("builds both named ESM bundles with source maps and preserves the CLI shebang", () => {

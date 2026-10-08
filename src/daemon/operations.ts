@@ -516,10 +516,12 @@ export class Operations {
           : (requestedPersona ?? this.#persona(record.persona));
       if (record.title === "new conversation" && record.stats.turns === 0)
         startupPatch.title = titleFrom(params.text);
-      // A failed backend acquisition is still a failed attempt to revise or
-      // execute the plan. Persist invalidation before any child can be opened.
-      startupPatch.planReady = false;
-      record = await this.#options.store.update(record.id, startupPatch);
+      // A failed backend acquisition must consume an executable plan before
+      // any child can be opened. Already-invalid markers need no disk write.
+      if (record.planReady === true) startupPatch.planReady = false;
+      if (startupPatch.root === record.root) delete startupPatch.root;
+      if (Object.keys(startupPatch).length > 0)
+        record = await this.#options.store.update(record.id, startupPatch);
       this.#checkOpen();
       // A replacement resumes the latest native transcript, not the snapshot
       // from before this turn owned the conversation.
@@ -536,12 +538,18 @@ export class Operations {
         native,
       });
       this.#checkOpen();
-      // A crash after the first tool executes must still leave a resumable
-      // transcript. Commit its handle before permitting any prompt side effect.
-      record = await this.#options.store.update(record.id, {
-        native: { ...record.native, ...agent.native },
-        persona: persona?.name,
-      });
+      // A changed handle/persona must be durable before any prompt side
+      // effect. Warm unchanged state is already durable; don't fsync it again.
+      const updatedNative = { ...record.native, ...agent.native };
+      if (
+        updatedNative.sessionId !== record.native.sessionId ||
+        updatedNative.sessionFile !== record.native.sessionFile ||
+        persona?.name !== record.persona
+      )
+        record = await this.#options.store.update(record.id, {
+          native: updatedNative,
+          persona: persona?.name,
+        });
       this.#checkOpen();
     } catch (cause) {
       this.#owned.delete(turn.id);
