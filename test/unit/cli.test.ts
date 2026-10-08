@@ -221,7 +221,8 @@ describe("prefaix daemon", () => {
     // daemon killed with -9 leaves behind.
     const { mkdir, writeFile } = await import("node:fs/promises");
     await mkdir(join(home, "run", "prefaix"), { recursive: true });
-    await writeFile(paths.lock, "999999\n");
+    // Beyond Linux/macOS PID ranges; a guessed six-digit pid can be live.
+    await writeFile(paths.lock, "2147483647\n");
     out = [];
     expect(await daemonStatus([], io())).toBe(EXIT.ok);
     expect(out.join("")).toContain("stale lock");

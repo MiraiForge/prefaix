@@ -719,7 +719,8 @@ describe("the lock", () => {
 
   it("takes over a lock whose pid is dead", async () => {
     mkdirSync(join(home, "run", "prefaix"), { recursive: true });
-    writeFileSync(paths.lock, "999999\n");
+    // Beyond Linux/macOS PID ranges; a guessed six-digit pid can be live.
+    writeFileSync(paths.lock, "2147483647\n");
     await startDaemon();
     const pid = await (
       await import("../../src/daemon/lock.js")
