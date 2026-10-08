@@ -32,7 +32,8 @@ export interface AcquireRequest {
   readonly title?: string;
   readonly model?: { provider: string; id: string };
   readonly thinking?: string;
-  readonly persona?: PersonaSpec;
+  /** Omitted keeps a warm binding's persona; null explicitly restores defaults. */
+  readonly persona?: PersonaSpec | null;
   readonly native?: NativeRef;
 }
 
@@ -137,6 +138,8 @@ export class AgentPool {
       const envHash = envFingerprint(request.env);
       const existing = this.#bindings.get(request.conversationId);
       if (existing !== undefined) {
+        if (request.persona === undefined && existing.persona !== undefined)
+          request = { ...request, persona: existing.persona };
         this.#pruneCrashes(existing);
         if (
           !existing.closed &&
@@ -153,7 +156,8 @@ export class AgentPool {
           existing.root !== request.root;
         const personaChanged =
           request.persona !== undefined &&
-          JSON.stringify(request.persona) !== JSON.stringify(existing.persona);
+          JSON.stringify(request.persona ?? undefined) !==
+            JSON.stringify(existing.persona);
         if (
           respawn ||
           (personaChanged && !this.#backend.capabilities.personasWithoutRespawn)
@@ -168,8 +172,23 @@ export class AgentPool {
           if (existing.session.setPersona === undefined) {
             throw unsupported(this.#backend.id, "personasWithoutRespawn");
           }
-          await existing.session.setPersona(request.persona!);
-          existing.persona = request.persona;
+          try {
+            await existing.session.setPersona(request.persona ?? undefined);
+          } catch (cause) {
+            // A configured bridge can fail to load for just this child. Keep
+            // the native transcript, but apply tools safely at spawn instead.
+            if (
+              !(cause instanceof PrefaixError) ||
+              cause.code !== "UNSUPPORTED"
+            )
+              throw cause;
+            const native = { ...existing.session.native };
+            await this.#closeBinding(existing);
+            await this.#makeRoom();
+            return (await this.#open(request, envHash, native, existing))
+              .session;
+          }
+          existing.persona = request.persona ?? undefined;
         }
         existing.lastUsed = this.#now();
         this.#assertOpen();
@@ -202,7 +221,7 @@ export class AgentPool {
       ...(request.title === undefined ? {} : { title: request.title }),
       ...(request.model === undefined ? {} : { model: request.model }),
       ...(request.thinking === undefined ? {} : { thinking: request.thinking }),
-      ...(request.persona === undefined ? {} : { persona: request.persona }),
+      ...(request.persona == null ? {} : { persona: request.persona }),
     };
     this.#opening += 1;
     try {
@@ -213,7 +232,7 @@ export class AgentPool {
         envHash,
         session,
         lastUsed: this.#now(),
-        persona: request.persona,
+        persona: request.persona ?? undefined,
         crashes: previous?.crashes ?? [],
         degraded: previous?.degraded ?? false,
         crashObserved: false,
@@ -424,9 +443,9 @@ export class AgentPool {
         Object.keys(request.native).length > 0) ||
       (request.title !== undefined && session.rename === undefined) ||
       (request.thinking !== undefined && session.setThinking === undefined) ||
-      // Persona tools must be applied by the spawn plan, even when a
-      // configured backend claims that its bridge can switch them live.
-      request.persona !== undefined
+      // A persona-bearing request gets its own child so the runtime bridge
+      // probe and spawn-time fallback are verified before any prompt.
+      request.persona != null
     ) {
       return undefined;
     }
@@ -446,7 +465,7 @@ export class AgentPool {
       envHash,
       session,
       lastUsed: this.#now(),
-      persona: request.persona,
+      persona: request.persona ?? undefined,
       crashes: [],
       degraded: false,
       crashObserved: false,

@@ -175,8 +175,10 @@ const CASES: readonly [string, Expect][] = [
     ":plan how to split this",
     { kind: "prompt", text: "how to split this", persona: "plan" },
   ],
-  [": ask", { kind: "command", name: "ask", args: "", known: false }],
-  [": plan", { kind: "command", name: "plan", args: "", known: false }],
+  [": ask", { kind: "command", name: "ask", args: "", known: true }],
+  [": plan", { kind: "command", name: "plan", args: "", known: true }],
+  [":go", { kind: "command", name: "go", args: "", known: true }],
+  [": go away", { kind: "prompt", text: "go away" }],
   [": asdk something", { kind: "prompt", text: "asdk something" }],
 
   // ── agent slash commands ─────────────────────────────────────────────────
@@ -397,6 +399,52 @@ describe("configurable behaviour", () => {
   it("accepts a persona the user defined", () => {
     const parsed = parseLine(": audit the deps", { personas: ["audit"] });
     expect(parsed).toMatchObject({ kind: "prompt", persona: "audit" });
+  });
+
+  it("recognizes a bare custom persona so the client can ask for a prompt", () => {
+    expect(parseLine(":audit", { personas: ["audit"] })).toMatchObject({
+      kind: "command",
+      name: "audit",
+      args: "",
+      known: true,
+    });
+  });
+
+  it.each(["model", "m", "new", "n", "go"])(
+    "does not let a persona shadow :%s",
+    (name) => {
+      expect(parseLine(`:${name} text`, { personas: [name] })).toMatchObject({
+        kind: "command",
+        name,
+        args: "text",
+      });
+    },
+  );
+
+  it.each(["plan", "audit"])(
+    "routes :%s with the prompt on a continuation line",
+    (name) => {
+      expect(
+        parseLine(`:${name}\nTask on the next line`, { personas: ["audit"] }),
+      ).toMatchObject({
+        kind: "prompt",
+        persona: name,
+        text: "\nTask on the next line",
+      });
+      expect(parseLine(`:${name}\n   `, { personas: ["audit"] })).toMatchObject(
+        { kind: "command" },
+      );
+    },
+  );
+
+  it("preserves multiline persona input", () => {
+    expect(
+      parseLine(":audit first\nsecond", { personas: ["audit"] }),
+    ).toMatchObject({
+      kind: "prompt",
+      persona: "audit",
+      text: "first\nsecond",
+    });
   });
 
   it("marks an M4 command known once this build reaches M4", () => {

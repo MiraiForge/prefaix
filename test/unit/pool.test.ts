@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentPool } from "../../src/daemon/pool.js";
+import { PrefaixError } from "../../src/core/errors.js";
 import {
   createFakeAgent,
   type FakeAgentOptions,
@@ -136,6 +137,10 @@ describe("when the child's environment changes", () => {
           COLUMNS: "200",
           TERM_SESSION_ID: "abc",
           PREFAIX_SHELL_ID: "9-9-z",
+          READLINE_LINE: ":plan a different task",
+          READLINE_POINT: "22",
+          READLINE_MARK: "0",
+          READLINE_ARGUMENT: "1",
         },
       }),
     );
@@ -481,6 +486,95 @@ describe("personas", () => {
       "plan",
     );
   });
+});
+
+describe("restoring persona tools", () => {
+  it.each([true, false])(
+    "clears a persona with live switching = %s",
+    async (live) => {
+      const tracked = trackedBackend();
+      const p = new AgentPool({
+        backend: {
+          ...tracked.backend,
+          capabilities: {
+            ...tracked.backend.capabilities,
+            personasWithoutRespawn: live,
+          },
+        },
+        config: config(),
+        spare: false,
+      });
+      try {
+        const first = await p.acquire(
+          request({ persona: { name: "plan", tools: ["read"] } }),
+        );
+        const second = await p.acquire(request({ persona: null }));
+        expect(second === first).toBe(live);
+        expect((second as { persona?: unknown }).persona).toBeUndefined();
+        expect(second.native).toEqual(first.native);
+        if (!live)
+          expect(tracked.open.mock.calls[1]?.[0].persona).toBeUndefined();
+      } finally {
+        await p.close();
+      }
+    },
+  );
+
+  it("retains a persona when an env change respawns an omitted-persona request", async () => {
+    const tracked = trackedBackend();
+    const p = new AgentPool({
+      backend: tracked.backend,
+      config: config(),
+      spare: false,
+    });
+    try {
+      await p.acquire(request({ persona: { name: "ask", tools: ["read"] } }));
+      await p.acquire(request({ env: { PATH: "/bin" } }));
+      expect(tracked.open.mock.calls[1]?.[0].persona).toEqual({
+        name: "ask",
+        tools: ["read"],
+      });
+    } finally {
+      await p.close();
+    }
+  });
+
+  it.each(["UNSUPPORTED", "AGENT_UNAVAILABLE"])(
+    "handles a per-child switch failure %s",
+    async (code) => {
+      const tracked = trackedBackend();
+      const p = new AgentPool({
+        backend: tracked.backend,
+        config: config(),
+        spare: false,
+      });
+      try {
+        const first = await p.acquire(request());
+        first.setPersona = async () => {
+          throw new PrefaixError(
+            code as "UNSUPPORTED" | "AGENT_UNAVAILABLE",
+            "switch failed",
+          );
+        };
+        const next = p.acquire(
+          request({ persona: { name: "ask", tools: ["read"] } }),
+        );
+        if (code === "UNSUPPORTED") {
+          const second = await next;
+          expect(second).not.toBe(first);
+          expect(second.native).toEqual(first.native);
+          expect(tracked.open.mock.calls[1]?.[0].persona?.tools).toEqual([
+            "read",
+          ]);
+        } else {
+          await expect(next).rejects.toThrow("switch failed");
+          expect(tracked.open).toHaveBeenCalledTimes(1);
+        }
+      } finally {
+        await p.close();
+      }
+    },
+  );
 });
 
 describe("capabilities and warm lookups", () => {

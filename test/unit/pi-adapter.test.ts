@@ -1,8 +1,10 @@
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,6 +12,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PrefaixError } from "../../src/core/errors.js";
+import { spawnRpcProcess } from "../../scripts/spikes/rpc-live.js";
 import type {
   AgentEvent,
   PromptInput,
@@ -1575,6 +1578,159 @@ describe("local session lifecycle health", () => {
 });
 
 describe("runtime persona switching", () => {
+  it.each(["opened", "prompt", "cleared", "default"])(
+    "refuses a prompt if a live bridge loses context delivery (%s persona) and recovers on the same child",
+    async (source) => {
+      const dir = mkdtempSync(join(tmpdir(), "pfx-context-failure-"));
+      const tracePath = tempTrace();
+      const persona = { name: "ask", tools: ["read"] };
+      const adapter = createPiAdapter({
+        bridgePath: "/pfx/pi-bridge.js",
+        turnsDir: dir,
+        bridgeReady: () => true,
+        rpc: {
+          bin: process.execPath,
+          args: [CHILD, join(FIXTURES, "stream.jsonl")],
+          cwd: ROOT,
+          env: { PREFAIX_CHILD_TRACE: tracePath },
+          requestTimeoutMs: 2000,
+          readyTimeoutMs: 4000,
+        },
+      });
+      const session = (await adapter.open({
+        root: ROOT,
+        env: {},
+        ...(source === "opened" || source === "cleared" ? { persona } : {}),
+      })) as PiSession;
+      try {
+        if (source === "cleared") {
+          await run(session, input("First read-only turn."));
+          await session.setPersona(undefined);
+        }
+        const before = trace(tracePath).filter(
+          (c) => c["type"] === "prompt",
+        ).length;
+        const pid = session.pid;
+        rmSync(dir, { recursive: true, force: true });
+        const prompt = {
+          ...input("Must not reach the model."),
+          ...(source === "prompt" ? { persona } : {}),
+        };
+        const failed = await run(session, prompt);
+        expect(failed.filter((e) => e.type === "settled")).toHaveLength(1);
+        expect(failed.at(-1)).toMatchObject({
+          type: "settled",
+          stopReason: "error",
+          error: expect.stringContaining("pi bridge"),
+        });
+        expect(
+          trace(tracePath).filter((c) => c["type"] === "prompt"),
+        ).toHaveLength(before);
+        expect(session.busy).toBe(false);
+        expect(session.isAlive).toBe(true);
+        mkdirSync(dir);
+        const recovered = await run(session, prompt);
+        expect(recovered.at(-1)).toEqual({
+          type: "settled",
+          stopReason: "stop",
+        });
+        expect(session.pid).toBe(pid);
+        expect(
+          trace(tracePath)
+            .filter((c) => c["type"] === "prompt")
+            .at(-1)?.["message"],
+        ).toBe(prompt.text);
+      } finally {
+        await session.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("keeps normal spawn tools for a bridge persona's restoration baseline", () => {
+    const options = {
+      root: ROOT,
+      env: {},
+      persona: { name: "plan", tools: ["read"] },
+    };
+    expect(
+      buildSpawnPlan(options, { bridgePath: "/bridge.js", turnsDir: "/turns" })
+        .args,
+    ).not.toContain("--tools");
+    const bounded = buildSpawnPlan(options, {
+      bridgePath: "/bridge.js",
+      turnsDir: "/turns",
+      personaTools: ["read", "bash"],
+    });
+    expect(bounded.args[bounded.args.indexOf("--tools") + 1]).toBe("read,bash");
+  });
+
+  it.each([true, false])(
+    "applies the open persona with bridge live = %s, and never prompts before fallback restrictions",
+    async (live) => {
+      const dir = mkdtempSync(join(tmpdir(), "pfx-open-persona-"));
+      const calls: { args: readonly string[]; trace: string }[] = [];
+      const adapter = createPiAdapter({
+        bridgePath: "/pfx/pi-bridge.js",
+        turnsDir: dir,
+        bridgeReady: () => live,
+        rpc: {
+          spawn: (_bin, args) => {
+            const tracePath = join(dir, `commands-${calls.length}.jsonl`);
+            calls.push({ args, trace: tracePath });
+            return spawnRpcProcess(
+              process.execPath,
+              [CHILD, join(FIXTURES, "stream.jsonl")],
+              {
+                cwd: ROOT,
+                env: { PREFAIX_CHILD_TRACE: tracePath },
+              },
+            );
+          },
+          requestTimeoutMs: 2000,
+          readyTimeoutMs: 4000,
+        },
+      });
+      const persona = { name: "ask", tools: ["read"], guideline: "Read only." };
+      const session = (await adapter.open({
+        root: ROOT,
+        env: {},
+        persona,
+      })) as PiSession;
+      try {
+        expect(session.persona).toEqual(persona);
+        expect(calls).toHaveLength(live ? 1 : 2);
+        expect(calls[0]?.args).not.toContain("--tools");
+        expect(adapter.sessions).toEqual([session]);
+        if (!live) {
+          const fallback = calls[1]!;
+          expect(fallback.args[fallback.args.indexOf("--tools") + 1]).toBe(
+            "read",
+          );
+          expect(fallback.args).not.toContain("-e");
+          expect(
+            trace(calls[0]!.trace).some((c) => c["type"] === "prompt"),
+          ).toBe(false);
+        }
+        await run(session, input("unchanged user prompt"));
+        const prompt = trace(calls.at(-1)!.trace).find(
+          (c) => c["type"] === "prompt",
+        );
+        expect(prompt?.["message"]).toEqual(
+          live
+            ? "unchanged user prompt"
+            : expect.stringContaining("Read only."),
+        );
+        if (live) {
+          await session.setPersona(undefined);
+          expect(session.persona).toBeUndefined();
+        }
+      } finally {
+        await session.close();
+      }
+    },
+  );
+
   it("rejects a switch when a configured bridge failed to load", async () => {
     const adapter = createPiAdapter({
       bridgePath: "/pfx/pi-bridge.js",

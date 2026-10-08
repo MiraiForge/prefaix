@@ -31,7 +31,9 @@ export interface ConversationRecord {
   updatedAt: string;
   model?: { provider: string; id: string };
   thinking?: string;
-  persona?: string;
+  persona?: string | undefined;
+  /** Only a successfully completed planning turn can be executed by :go. */
+  planReady?: boolean;
   lastAssistantText?: string;
   usage?: { input: number; output: number; costUsd?: number };
   stats: { turns: number; costUsd?: number; lastContextPct?: number };

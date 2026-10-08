@@ -63,6 +63,91 @@ Its artifact hash is
 raw report: `build/m3-validation/final-local-performance.json`. This local
 pass does not make the old committed CI artifact validate the new source.
 
+## M4 Codex review hardening: 2026-10-08
+
+Codex 0.160.1 uses `codex review --uncommitted`, not the old `--review` flag.
+Three passes ran with `-s read-only -a never`: the first found three defects,
+the second found a follow-policy routing race in the state-refresh fix, and the
+last reported **no actionable defects**. The reviewer passed lint, formatting,
+typechecking, and read-only smoke assertions; its sandbox blocked Vitest's
+temporary config file, so the complete suites were run separately below.
+
+All four findings are fixed:
+
+- A live pi bridge that cannot receive a turn file now refuses before sending
+  any prompt, rather than exposing normal tools for a read-only persona or
+  retaining stale restrictions during restoration.
+- A completed-plan marker is invalidated under ownership before fallible
+  backend acquisition. Failed planning, continuation, or execution startup
+  cannot leave the previous plan executable.
+- Persona and native state are refreshed under ownership, preventing a delayed
+  ordinary prompt from resurrecting `plan` after another shell's `:go`.
+- Under `workspace.cwd_policy = "follow"`, the caller's routed root survives
+  that refresh; another shell's move cannot redirect the delayed prompt.
+
+Twelve added regression cases cover these findings; before-fix runs reproduced
+ten failures. Validation also exposed two pre-existing stale-lock tests whose
+guessed PID `999999` was live during the run. Their fixtures now use a value
+outside supported Linux/macOS PID ranges; production lock behavior is unchanged.
+
+Final local validation after all fixes:
+
+- `bun run check`: 1,880 passed, 10 deliberate expected contract failures,
+  10 optional skips.
+- `bun run coverage`: statements 97.81%, branches 95.82%, functions 96.00%,
+  lines 98.13%; all 95% enforced thresholds pass.
+- `bun run test:e2e`: 125 passed, 19 optional skips. The five-case command
+  suite also passes separately on fish and bash, in addition to default zsh.
+- Native pi 1.0.4 loopback proof: a missing turns directory after bridge
+  readiness produces one local error settlement, zero new API requests, and no
+  failed user message in the native transcript. Restoring it recovers on the
+  same child. The seven successful scripted requests remain loopback-only:
+  **zero remote native model requests**. Public evidence:
+  [M4-personas.md](spikes/M4-personas.md) and its provenance JSON.
+- `bun run test:perf`: hello p50/p95 30.79/34.45ms; first token
+  48.64/52.97ms. All throughput and idle-memory gates pass without using the
+  Node 26 exception.
+- `bun run docs:check`, `bun run check:private`, formatting, and
+  `git diff --check` pass.
+
+Review logs remain gitignored under
+`build/reviews/codex-personas-{initial,followup,final}.log`; raw native and
+performance evidence is in `build/spikes/personas-native-codex-review/`.
+This review does not complete the M3 human or release gates, authorize
+publishing, or prove natural-model behavior.
+
+## M4 persona implementation: 2026-10-07
+
+[M4-5 evidence](spikes/M4-personas.md) verifies built-in/custom personas and
+normal-tool restoration through actual pi 1.0.4, PiAdapter, and AgentPool.
+The isolated loopback probe makes seven scripted local API requests and zero
+remote model requests. Native transcript schema deltas match the offered tools
+on every turn; visible prompts and the child/session identity are preserved.
+
+Local Linux validation on Node 26.10.0 and Bun 1.4.2:
+
+- `bun run check`: **1,868 passed**, 10 deliberate expected contract failures,
+  and 10 optional skips.
+- `bun run coverage`: statements **97.77%**, branches **95.76%**, functions
+  **95.90%**, lines **98.09%**; all enforced 95% thresholds pass.
+- `bun run test:e2e`: **125 passed**, 19 optional cases skipped. The five-case
+  command suite also passes independently on fish and bash, including the
+  persona/plan/go warm-child assertion. Measured shells: zsh 5.9.2, fish 4.9.3,
+  bash 5.3.20. This is not a substitute for the supported-version/OS CI matrix.
+- `bun run test:perf`: 50 measured turns; hello p50/p95
+  **31.52/36.49ms**, first token p50/p95 **49.75/55.83ms**.
+  Fresh/post-use RSS **48.98/53.89MiB**; all three memory states and throughput
+  pass without using the Node 26 exception.
+- `bun run docs:check`, `bun run check:private`, and `git diff --check` pass.
+
+Performance artifact:
+`335d8f0e2daf8baf84e82c72d2f30c406716b08410ebb19df8c3d4d11e1fadca`.
+Local report: `build/spikes/personas-native-m4-final/performance.json`.
+
+These are local implementation results, not new remote CI or release approval.
+M3 human walkthrough/daily-use gates and frozen release-artifact validation
+remain separate.
+
 ## Automated gates
 
 Run `bun run check`, `bun run coverage`, `bun run test:e2e`, `bun run test:perf`,

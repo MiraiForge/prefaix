@@ -50,7 +50,7 @@ import {
   type PiRecord,
 } from "./types.js";
 
-import { PI_ID, piCapabilities } from "./capabilities.js";
+import { PI_ID, piCapabilities, bridgeConfigured } from "./capabilities.js";
 import { assertResumeRoot } from "./resume-root.js";
 export { PI_ID, bridgeConfigured } from "./capabilities.js";
 
@@ -138,7 +138,11 @@ export function buildSpawnPlan(
     args.push("--thinking", thinking);
   }
 
-  const tools = options.persona?.tools ?? config.personaTools;
+  // Capture the normal runtime loadout, not a persona's narrowed spawn
+  // loadout, so the bridge can later restore all normal tools for :go.
+  const tools = bridgeConfigured(config)
+    ? config.personaTools
+    : (options.persona?.tools ?? config.personaTools);
   if (tools !== undefined) {
     args.push("--tools", tools.join(","));
   }
@@ -174,6 +178,7 @@ export class PiSession implements AgentSession {
       readonly turnsDir?: string;
       /** Omit to bind the pid later, once the child exists. */
       readonly pid?: number;
+      readonly persona?: PersonaSpec;
     },
   ) {
     this.#rpc = rpc;
@@ -185,6 +190,7 @@ export class PiSession implements AgentSession {
     this.#mapperOptions = options.mapper ?? {};
     this.#turnsDir = origin.turnsDir;
     this.#pid = origin.pid;
+    this.#persona = origin.persona;
   }
 
   /** pi's pid, which names this child's context and ready files. */
@@ -358,6 +364,16 @@ export class PiSession implements AgentSession {
     if (this.#publishContext(input)) {
       return input.text;
     }
+    if (this.#bridgeLive) {
+      // Spawn kept the normal tools so the bridge can restore them later.
+      // Without this turn's file, neither restriction nor restoration is
+      // guaranteed. Never replace enforced persona state with prose alone.
+      throw new PrefaixError(
+        "AGENT_ERROR",
+        "could not deliver turn context to the pi bridge; prompt not sent",
+        { hint: "Restore the runtime turns directory and retry the turn." },
+      );
+    }
     // The bridge is absent or did not load. Dropping the block instead would
     // silently remove cwd, recent commands, the terminal, and the persona from
     // every request, so the same text is prepended to the message.
@@ -378,8 +394,8 @@ export class PiSession implements AgentSession {
         : { persona: input.persona ?? (this.#persona as PersonaSpec) }),
     };
     if (!writeTurnContext(turnContextFile(turnsDir, pid), payload)) {
-      // A context file that could not be written would leave the turn with no
-      // context at all, so the prompt falls back rather than trusting it.
+      // The caller must refuse a live-bridge turn rather than trust missing
+      // context or send it without the intended tool switch.
       return false;
     }
     return true;
@@ -565,7 +581,7 @@ export class PiSession implements AgentSession {
     return asText(await this.#rpc.request("get_last_assistant_text"));
   }
 
-  async setPersona(persona: PersonaSpec): Promise<void> {
+  async setPersona(persona: PersonaSpec | undefined): Promise<void> {
     if (!this.#bridgeLive) {
       throw new PrefaixError(
         "UNSUPPORTED",
@@ -704,8 +720,17 @@ export class PiAdapter implements AgentBackend {
   }
 
   async open(opts: OpenOptions): Promise<AgentSession> {
+    return this.#open(opts);
+  }
+
+  async #open(opts: OpenOptions, fallback = false): Promise<PiSession> {
     await assertResumeRoot(opts.resume?.sessionFile, opts.root);
-    const plan = buildSpawnPlan(opts, this.#options);
+    const plan = buildSpawnPlan(
+      opts,
+      fallback
+        ? { ...this.#options, bridgePath: "", turnsDir: "" }
+        : this.#options,
+    );
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(opts.env)) {
       if (value !== undefined) {
@@ -746,6 +771,7 @@ export class PiAdapter implements AgentBackend {
       bin: this.#options.rpc?.bin ?? plan.bin,
       root: opts.root,
       ...(turnsDir === undefined ? {} : { turnsDir }),
+      ...(opts.persona === undefined ? {} : { persona: opts.persona }),
     });
     this.#sessions.add(session);
     try {
@@ -758,7 +784,7 @@ export class PiAdapter implements AgentBackend {
           !session.probeBridge({
             ...(this.#options.bridgePath === undefined
               ? {}
-              : { bridgePath: this.#options.bridgePath }),
+              : { bridgePath: fallback ? "" : this.#options.bridgePath }),
             ...(this.#options.bridgeReady === undefined
               ? {}
               : { ready: this.#options.bridgeReady }),
@@ -771,6 +797,21 @@ export class PiAdapter implements AgentBackend {
               : { bridgePath: this.#options.bridgePath }),
           });
         }
+      }
+      if (
+        !fallback &&
+        bridgeConfigured(this.#options) &&
+        !session.bridgeLive &&
+        opts.persona?.tools !== undefined
+      ) {
+        // No prompt has been sent. Restart once with spawn-time restrictions
+        // rather than silently running a read-only persona with full tools.
+        this.#sessions.delete(session);
+        await session.close();
+        return await this.#open(
+          { ...opts, resume: { ...session.native } },
+          true,
+        );
       }
     } catch (cause) {
       this.#sessions.delete(session);

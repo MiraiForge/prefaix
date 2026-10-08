@@ -38,6 +38,7 @@ import type {
   ShellKind,
   UiResponse,
 } from "../core/agent-port.js";
+import { PLAN_EXECUTION_PROMPT } from "../core/protocol.js";
 import type {
   ConversationSummary,
   ModelListResult,
@@ -303,6 +304,7 @@ export async function run(options: RunOptions): Promise<ExitCode> {
 
     let text: string | undefined;
     let persona: string | undefined;
+    let executePlan: boolean | undefined;
     let conversationId = args.conversationId;
     exit = EXIT.ok;
     if (parsed.kind === "command") {
@@ -320,6 +322,7 @@ export async function run(options: RunOptions): Promise<ExitCode> {
       conversationId = result.conversationId ?? conversationId;
       if (conversationId !== "") directives.conversation = conversationId;
       text = result.text;
+      executePlan = result.executePlan;
     } else if (parsed.kind === "agent") {
       text = `/${parsed.name} ${parsed.args}`.trim();
     } else {
@@ -330,6 +333,9 @@ export async function run(options: RunOptions): Promise<ExitCode> {
         throw new PrefaixError(
           "USAGE",
           `unknown persona ${JSON.stringify(parsed.persona)}`,
+          {
+            hint: `Known personas: ${Object.keys(config.personas).join(", ")}`,
+          },
         );
       }
       persona = parsed.persona;
@@ -356,6 +362,7 @@ export async function run(options: RunOptions): Promise<ExitCode> {
           directives.conversation = id;
         },
         ...(persona === undefined ? {} : { persona }),
+        ...(executePlan === undefined ? {} : { executePlan }),
       });
       exit = result.exit;
       conversationId = result.conversationId;
@@ -471,6 +478,7 @@ interface TurnOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly text: string;
   readonly persona?: string;
+  readonly executePlan?: boolean;
   readonly controller: AbortController;
   readonly setTurnId: (turnId: string) => void;
   readonly setConversationId: (conversationId: string) => void;
@@ -525,6 +533,9 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
       env: built.agentEnv,
       text: options.text,
       ...(options.persona === undefined ? {} : { persona: options.persona }),
+      ...(options.executePlan === undefined
+        ? {}
+        : { executePlan: options.executePlan }),
       context: {
         recent: built.context.recent,
         os: built.context.os,
@@ -573,6 +584,7 @@ interface CommandResult {
   exit: ExitCode;
   conversationId?: string;
   text?: string;
+  executePlan?: boolean;
 }
 
 function shellInfo(args: RunArgs) {
@@ -594,6 +606,10 @@ async function runCommand(
   config: PrefaixConfig,
   options: RunOptions,
 ): Promise<CommandResult> {
+  if (parsed.summary === "Run a persona.")
+    throw new PrefaixError("USAGE", `:${parsed.name} requires a prompt`, {
+      hint: `Use ':${parsed.name} <text>' to run this persona.`,
+    });
   if (parsed.summary === "unknown command") {
     const { commands } = await client
       .call<{ commands: AgentCommand[] }>("commands.list", {
@@ -611,10 +627,14 @@ async function runCommand(
       return { exit: EXIT.ok, text: commandPrompt(matching, parsed.args) };
     const matches = suggestions(parsed.name, [
       ...COMMAND_NAMES,
+      ...Object.keys(config.personas),
       ...commands.map(commandAlias),
     ]);
     err(
       `prefaix: :${parsed.name} is not a command.${matches.length === 0 ? " Use :help to see commands, or ': <text>' to send a prompt." : ` Did you mean ${matches.map((name) => `:${name}`).join(", ")}?`}\n`,
+    );
+    err(
+      `Known personas: ${Object.keys(config.personas).join(", ")}. Use :<persona> <text>.\n`,
     );
     return { exit: EXIT.usage };
   }
@@ -649,6 +669,13 @@ async function runCommand(
     env: filterEnv(env, config.env),
   };
   switch (parsed.name) {
+    case "go":
+      if (args.conversationId === "")
+        throw new PrefaixError(
+          "USAGE",
+          "no active plan; use :plan <task> first",
+        );
+      return { exit: EXIT.ok, text: PLAN_EXECUTION_PROMPT, executePlan: true };
     case "new":
     case "n": {
       const created = await client.call<ConversationSummary>("conv.new", {
@@ -819,6 +846,7 @@ async function runInfo(
   );
   if (conversation !== undefined) {
     renderer.line(`root: ${conversation.root}`);
+    renderer.line(`persona: ${conversation.persona ?? "default"}`);
   }
   renderer.line(`backend: ${status.backend}`);
   if (status.usage !== undefined)
@@ -865,6 +893,10 @@ const HELP_LINES: readonly string[] = [
   "  :think <level>      set the thinking level",
   "  :info               what this conversation is doing",
   "  :copy               copy the last answer",
+  "  :ask <text>         use read-only tools to answer",
+  "  :plan <task>        plan with read-only tools",
+  "  :go                 execute the completed plan with normal tools",
+  "  :<persona> <text>   use a configured [personas.<name>] persona",
   "  :help               this text",
   "  :doctor             check the backend, shell, socket, and config",
   "",

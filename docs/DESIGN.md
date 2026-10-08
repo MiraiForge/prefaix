@@ -92,7 +92,8 @@ History: the original line is added to shell history exactly as typed (zsh `prin
 | `:compact [focus]` | | run | M4 | Backend compaction. |
 | `:rename <title>` | `:rn` | run | M4 | |
 | `:skill [name] [args]` | | run | M4 | Picker over agent skills. pi maps this to `/skill:<name>`. |
-| `:ask <q>` / `:plan <task>` | | run | M4 | Built-in personas (read-only tools plus a persona prompt). User-defined personas come from config. |
+| `:ask <q>` / `:plan <task>` | | run | M4 | Built-in personas (read-only tools plus a persona prompt). User-defined personas come from config. The selection persists on ordinary prompts and respawn; `:info` shows it. |
+| `:go` | | run | M4 | Execute a successful, nonempty planning answer with the normal backend tools in the same conversation/root. No arguments; reject failed, consumed, or cross-root plans. |
 | `:attach` | | run | M4 | Re-attach to a detached or still-running turn and replay its output. |
 | `:abort` | | run | M4 | Abort a detached turn. |
 | `:tui` | | run | M4 | Opens this conversation in pi's full TUI. Afterwards the conversation continues in prefaix. |
@@ -389,7 +390,8 @@ interface TurnStartParams {
   cwd: string;
   env: Record<string, string>;      // filtered (§7.2)
   text: string;
-  persona?: string;                 // "ask" | "plan" | user-defined
+  persona?: string | null;          // omitted retains; null restores normal tools
+  executePlan?: boolean;             // :go; guarded completed-plan transition
   context: {
     recent: { cmd: string; exit: number | null; at?: number }[];
     os: string;
@@ -496,7 +498,7 @@ export interface AgentSession {
   listCommands?(): Promise<AgentCommand[]>;    // skills, templates, extension commands
   compact?(focus?: string): Promise<CompactResult>;
   lastAssistantText(): Promise<string | null>;
-  setPersona?(p: PersonaSpec): Promise<void>;
+  setPersona?(p: PersonaSpec | undefined): Promise<void>; // undefined restores normal tools
   rename?(title: string): Promise<void>;
   tuiCommand?(): { argv: string[]; cwd: string };   // for :tui handoff
   close(): Promise<void>;
@@ -623,9 +625,10 @@ A tiny pi extension, loaded with `-e`, that makes pi prefaix-aware without touch
   2. On `before_agent_start` the extension reads the file and sets a `prefaix` system-prompt section (§7.1). pi records it as a section delta, so your **visible user message stays exactly what you typed**.
   3. Writes are sequential per child, so there is no race.
 - **Personas without respawn.** On a persona change it calls `pi.setActiveTools([...])` and patches a `persona` section. `:ask` means `read, grep, find, ls` plus the "answer, don't modify" guideline. [S9](spikes/S9-pi-bridge-extension.md) verifies native schema changes and restoration; capture the baseline at `session_start`, after runtime binding, not at extension load.
+- **Restoration.** Leaving a persona (`:go`) or switching to a guideline-only persona restores the runtime baseline, including user extension tools. The daemon persists persona selection and a completed-plan marker. It resolves retained persona/native state under turn ownership and invalidates the old marker before fallible backend acquisition; `:go` checks the current marker, never infers a plan from an older cached answer. [M4 native evidence](spikes/M4-personas.md) verifies actual tool schemas and transcript deltas through the adapter/pool.
 - **Pre-ack UI.** Native extensions can request a dialog before prompt acknowledgment or `agent_start`. Consume events concurrently with acknowledgment, forwarding normalized UI without teaching the foreground pi schemas. S9 includes reviewed native UI replay; long-held/native unanswered-dialog cancellation remains separate hardening.
 - **`propose_command` tool (M4).** It is active only for `:suggest` and `:commit`. The model returns `{command, explanation}`. The tool result sets `terminate: true`, and the adapter turns the args into `set_buffer`. This produces structured output instead of scraping model prose.
-- **Fallback.** If the extension fails to load (the capability probe at spawn fails), context is prepended to the prompt text as a compact `<shell-context>` block and personas respawn with `--tools`.
+- **Fallback.** If the extension fails to load (the capability probe at spawn fails), context is prepended to the prompt text as a compact `<shell-context>` block and personas respawn with `--tools`. A persona-bearing spawn does not narrow tools before a configured bridge captures its baseline; if that bridge fails, restart once with spawn-time restrictions before sending any prompt. A warm child's unsupported switch likewise respawns on its native handle. If a live bridge instead loses per-turn context delivery, refuse the prompt and settle locally with an error; prose-only fallback cannot enforce tool restrictions or restoration.
 
 #### 4.5.5 Commands to pi RPC
 

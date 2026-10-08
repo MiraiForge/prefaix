@@ -348,6 +348,25 @@ describe("personas switch tools without a respawn", () => {
     expect(sections["persona"]).toContain('"ask"');
   });
 
+  it("restores normal tools when switching from a restricted to a guideline-only persona", () => {
+    const fake = fakePi();
+    bridge(fake);
+    startTurn(fake, {
+      version: BRIDGE_VERSION,
+      context: CONTEXT,
+      persona: { name: "ask", tools: ["read"] },
+    });
+    const { sections } = startTurn(fake, {
+      version: BRIDGE_VERSION,
+      context: CONTEXT,
+      persona: { name: "review", guideline: "Ask before editing." },
+    });
+    expect(fake.applied.at(-1)).toEqual(["read", "bash", "edit", "write"]);
+    expect(sections["persona"]).toContain("Ask before editing.");
+    startTurn(fake, { version: BRIDGE_VERSION, context: CONTEXT });
+    expect(fake.applied.at(-1)).toEqual(["read", "bash", "edit", "write"]);
+  });
+
   it("leaves the tool set alone for a persona with no tools", () => {
     const fake = fakePi();
     bridge(fake);

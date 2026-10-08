@@ -30,6 +30,7 @@ import type { AgentPool } from "./pool.js";
 import type { TurnHandle, TurnManager } from "./turns.js";
 import { personaSpec } from "../core/config/index.js";
 import type { PrefaixConfig } from "../core/config/schema.js";
+import { PLAN_EXECUTION_PROMPT } from "../core/protocol.js";
 import type {
   CommandsListParams,
   ConvGetParams,
@@ -437,19 +438,48 @@ export class Operations {
     this.#checkOpen();
     if (params.text.startsWith("/"))
       this.#options.pool.require("slashCommands");
-    const persona = this.#persona(params.persona);
+    // Validate explicit names before creating a conversation as a side effect.
+    const requestedPersona = this.#persona(params.persona);
+    if (
+      params.executePlan === true &&
+      (params.conversationId === undefined ||
+        params.conversationId === "" ||
+        params.newConversation === true ||
+        params.persona != null)
+    )
+      throw new PrefaixError(
+        "USAGE",
+        ":go requires the active planning conversation",
+        {
+          hint: "Use :plan <task> first, then :go without arguments.",
+        },
+      );
     const resolved = await this.#resolveConversation(params);
-    let record = await this.#applyCwdPolicy(resolved.record, params.cwd);
+    if (params.executePlan === true) {
+      const root = await workspaceRoot(params.cwd, this.#options.gitRoot ?? {});
+      if (root !== resolved.record.root)
+        throw new PrefaixError(
+          "USAGE",
+          ":go cannot execute a plan in a different workspace",
+          {
+            hint: `Return to ${resolved.record.root}, or make a new plan here.`,
+          },
+        );
+      params = { ...params, text: PLAN_EXECUTION_PROMPT, persona: null };
+    }
+    let record =
+      params.executePlan === true
+        ? resolved.record
+        : await this.#applyCwdPolicy(resolved.record, params.cwd);
+    let persona: PersonaSpec | undefined;
     const startupPatch: Partial<ConversationRecord> = {};
     if (
-      record.id === resolved.record.id &&
-      record.root !== resolved.record.root
+      params.executePlan !== true &&
+      this.#options.config.workspace.cwdPolicy === "follow"
     ) {
+      // This is the caller's routed workspace, even if it equaled the stale
+      // snapshot. Another shell may move the record before we own the turn.
       startupPatch.root = record.root;
-    }
-    if (record.title === "new conversation" && record.stats.turns === 0) {
-      record = { ...record, title: titleFrom(params.text) };
-      startupPatch.title = record.title;
     }
     this.#checkOpen();
     const turn = this.#options.turns.start({
@@ -462,20 +492,39 @@ export class Operations {
     });
     this.#owned.set(turn.id, connection);
 
-    // The native handle is what lets a respawn continue the same transcript,
-    // so it is read from the warm child when there is one and from the record
-    // otherwise.
-    const warm = this.#options.pool.session(record.id);
-    const native = warm?.native ?? record.native;
-
     let agent: AgentSession;
     try {
-      // Apply intentional changes after claiming ownership. Later handle
-      // persistence must not copy a stale title over another shell's rename.
-      if (Object.keys(startupPatch).length > 0) {
-        record = await this.#options.store.update(record.id, startupPatch);
+      // Workspace routing can yield while another shell completes a turn.
+      // Resolve retained persona/native state only after claiming ownership.
+      const current = await this.#require(record.id);
+      if (params.executePlan === true) {
+        // Another shell could have consumed or replaced this plan while we
+        // resolved its workspace; never trust the pre-ownership snapshot.
+        if (current.persona !== "plan" || current.planReady !== true)
+          throw new PrefaixError("USAGE", "no completed plan to execute", {
+            hint: "Use :plan <task> and wait for a successful answer before :go.",
+          });
+        if (current.root !== record.root)
+          throw new PrefaixError("USAGE", "the planning workspace changed", {
+            hint: `Return to ${current.root}, or make a new plan here.`,
+          });
       }
+      record = current;
+      persona =
+        params.persona === null
+          ? undefined
+          : (requestedPersona ?? this.#persona(record.persona));
+      if (record.title === "new conversation" && record.stats.turns === 0)
+        startupPatch.title = titleFrom(params.text);
+      // A failed backend acquisition is still a failed attempt to revise or
+      // execute the plan. Persist invalidation before any child can be opened.
+      startupPatch.planReady = false;
+      record = await this.#options.store.update(record.id, startupPatch);
       this.#checkOpen();
+      // A replacement resumes the latest native transcript, not the snapshot
+      // from before this turn owned the conversation.
+      const native =
+        this.#options.pool.session(record.id)?.native ?? record.native;
       agent = await this.#options.pool.acquire({
         conversationId: record.id,
         root: record.root,
@@ -483,7 +532,7 @@ export class Operations {
         title: record.title,
         ...(record.model === undefined ? {} : { model: record.model }),
         ...(record.thinking === undefined ? {} : { thinking: record.thinking }),
-        ...(persona === undefined ? {} : { persona }),
+        persona: persona ?? null,
         native,
       });
       this.#checkOpen();
@@ -491,7 +540,7 @@ export class Operations {
       // transcript. Commit its handle before permitting any prompt side effect.
       record = await this.#options.store.update(record.id, {
         native: { ...record.native, ...agent.native },
-        ...(persona === undefined ? {} : { persona: persona.name }),
+        persona: persona?.name,
       });
       this.#checkOpen();
     } catch (cause) {
@@ -705,6 +754,11 @@ export class Operations {
       .lastAssistantText()
       .catch(() => null);
     const patch: Partial<ConversationRecord> = {
+      planReady:
+        record.persona === "plan" &&
+        summary.status === "stop" &&
+        lastAssistantText !== null &&
+        lastAssistantText.trim() !== "",
       ...(lastAssistantText === null ? {} : { lastAssistantText }),
       ...(state?.usage === undefined ? {} : { usage: state.usage }),
       native: { ...record.native, ...session.native },
@@ -962,8 +1016,8 @@ export class Operations {
     return this.#require(active);
   }
 
-  #persona(name: string | undefined): PersonaSpec | undefined {
-    if (name === undefined || name === "") {
+  #persona(name: string | null | undefined): PersonaSpec | undefined {
+    if (name == null || name === "") {
       return undefined;
     }
     const spec = personaSpec(this.#options.config, name);

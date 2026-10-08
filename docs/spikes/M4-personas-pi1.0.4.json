@@ -1,0 +1,49 @@
+{
+  "source": "controlled",
+  "provider": "kimi-coding",
+  "model": "kimi-coding/k3",
+  "piVersion": "1.0.4",
+  "recordedAt": "2026-10-08T02:05:50.381Z",
+  "stimulus": {
+    "api": "loopback-stub",
+    "remoteModelRequests": 0,
+    "scriptedUsage": true
+  },
+  "status": "passed",
+  "platform": "linux",
+  "arch": "x64",
+  "driver": "v26.3.0",
+  "samePid": true,
+  "userMessagesUnchanged": true,
+  "contextDeliveryFailure": {
+    "loopbackRequests": 0,
+    "transcriptUserMessages": 0,
+    "recoveredSameChild": true
+  },
+  "toolSets": [
+    ["bash", "edit", "read", "write"],
+    ["find", "grep", "ls", "read"],
+    ["find", "grep", "ls", "read"],
+    ["read"],
+    ["bash", "edit", "read", "write"],
+    ["find", "grep", "ls", "read"],
+    ["bash", "edit", "read", "write"]
+  ],
+  "transcriptTools": [
+    ["find", "grep", "ls", "read"],
+    ["find", "grep", "ls", "read"],
+    ["read"],
+    ["bash", "edit", "read", "write"],
+    ["find", "grep", "ls", "read"],
+    ["bash", "edit", "read", "write"]
+  ],
+  "apiRequests": 7,
+  "remoteModelRequests": 0,
+  "format": "prefaix-m4-personas-report",
+  "artifacts": {
+    "personas.jsonl": "5c2e41f50bf85e09d221d907ee7f34a7cc30922d220b4ef520ece36bbb10c040",
+    "personas.trace.jsonl": "34db8d2bf8e3c2ecb898eb45359c37b8c6db13da59c7671680a639629ae55c06",
+    "sessions/2026-10-08T02-05-50-514Z_pfx-01M4CM4ZDKQ6C1HE9446CT72G3.jsonl": "8931b2b879d086e5e7971829b13d59697110f1fb6989e484bfb0b160606bae5a",
+    "sessions/2026-10-08T02-05-50-707Z_pfx-01M4CM4ZKNJTZ0775C2RR7NDBF.jsonl": "14bcb6ba72edcdc578ff23511ffe2377fd79b9b29ab8bb68b4f833c9d46784ea"
+  }
+}

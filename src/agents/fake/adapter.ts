@@ -441,7 +441,7 @@ export class FakeSession implements AgentSession {
     return text === "" ? null : text;
   }
 
-  async setPersona(persona: PersonaSpec): Promise<void> {
+  async setPersona(persona: PersonaSpec | undefined): Promise<void> {
     this.persona = persona;
   }
 

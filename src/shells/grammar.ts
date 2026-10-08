@@ -146,7 +146,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     aliases: [],
     class: "run",
     milestone: "M4",
-    summary: "Answer with read-only tools; nothing is modified.",
+    summary: "Answer with the configured read-only persona.",
   },
   {
     name: "plan",
@@ -155,6 +155,15 @@ export const COMMANDS: readonly CommandSpec[] = [
     class: "run",
     milestone: "M4",
     summary: "Produce a numbered plan with read-only tools.",
+  },
+  {
+    name: "go",
+    takesArgs: false,
+    aliases: [],
+    class: "run",
+    milestone: "M4",
+    summary:
+      "Execute the completed plan with normal tools in this conversation.",
   },
   {
     name: "attach",
@@ -195,7 +204,7 @@ export const COMMAND_NAMES: readonly string[] = COMMANDS.flatMap((command) => [
   ...command.aliases,
 ]);
 
-/** Persona names the grammar accepts as a verb. M4 turns them into a turn. */
+/** Built-in persona names the grammar accepts as a verb. */
 export const PERSONA_NAMES: readonly string[] = ["ask", "plan"];
 
 export type Parsed =
@@ -257,6 +266,17 @@ export function parseLine(raw: string, options: GrammarOptions = {}): Parsed {
   const tail = line.slice(newline);
   // The first line determines routing; continuation lines remain literal
   // content. Classification must never discard part of the user's prompt.
+  if (
+    parsed.kind === "command" &&
+    parsed.summary === "Run a persona." &&
+    tail.trim() !== ""
+  )
+    return {
+      kind: "prompt",
+      text: tail,
+      persona: parsed.name,
+      newConversation: false,
+    };
   return parsed.kind === "prompt"
     ? { ...parsed, text: parsed.text + tail }
     : { ...parsed, args: parsed.args + tail };
@@ -317,8 +337,23 @@ function parseFirstLine(raw: string, options: GrammarOptions): Parsed {
   const name = head?.[1] as string;
   const args = rest.slice((head?.[0] ?? "").length);
 
+  const command = commandFor(name);
   const personas = [...PERSONA_NAMES, ...(options.personas ?? [])];
-  if (personas.includes(name) && args !== "") {
+  // Built-in commands/aliases win over colliding user-defined persona names.
+  if (
+    personas.includes(name) &&
+    (command === undefined || PERSONA_NAMES.includes(name))
+  ) {
+    if (args === "")
+      return {
+        kind: "command",
+        name,
+        args,
+        class: "run",
+        milestone: "M4",
+        summary: "Run a persona.",
+        known: true,
+      };
     return {
       kind: "prompt",
       text: args,
@@ -327,7 +362,6 @@ function parseFirstLine(raw: string, options: GrammarOptions): Parsed {
     };
   }
 
-  const command = commandFor(name);
   // `: copy the file` is a sentence. A command that takes no argument and was
   // given one is not that command; it is a prompt that happens to start with
   // the command's name.
@@ -372,6 +406,7 @@ function parseFirstLine(raw: string, options: GrammarOptions): Parsed {
 }
 
 function isImplemented(command: CommandSpec, options: GrammarOptions): boolean {
+  if (command.name === "go") return true;
   const reached = options.implemented ?? "MVP";
   const order = { MVP: 0, M4: 1, M5: 2 } as const;
   return order[command.milestone] <= order[reached];

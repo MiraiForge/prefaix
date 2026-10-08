@@ -119,7 +119,8 @@ export interface AgentSession {
   listCommands?(): Promise<AgentCommand[]>; // skills, templates, extension commands
   compact?(focus?: string): Promise<CompactResult>;
   lastAssistantText(): Promise<string | null>;
-  setPersona?(p: PersonaSpec): Promise<void>;
+  /** Undefined restores the backend's normal tool set and removes the guideline. */
+  setPersona?(p: PersonaSpec | undefined): Promise<void>;
   rename?(title: string): Promise<void>;
   tuiCommand?(): { argv: string[]; cwd: string }; // for :tui handoff
   close(): Promise<void>;

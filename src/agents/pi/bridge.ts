@@ -90,7 +90,7 @@ function sameTools(a: readonly string[], b: readonly string[]): boolean {
 export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
   const pid = options.pid ?? process.pid;
   const dir = bridgeDir();
-  // pi's own tool set before any persona narrowed it, captured at load so
+  // pi's own tool set before any persona narrowed it, captured at runtime so
   // leaving a persona can put it back rather than leaving the user stuck in
   // a read-only tool set.
   let defaultTools: string[] | undefined;
@@ -146,9 +146,9 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
         options_.sections["persona"] = guideline;
       }
       // D9: a persona switches tools in place, so no respawn is needed.
-      const tools = persona.tools;
+      const tools = persona.tools ?? defaultTools ?? [];
       if (
-        tools !== undefined &&
+        (persona.tools !== undefined || appliedPersona !== undefined) &&
         (appliedPersona !== persona.name ||
           !sameTools(tools, appliedTools ?? []))
       ) {

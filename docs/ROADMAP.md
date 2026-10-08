@@ -176,6 +176,13 @@ private and no release is implied by this implementation.
 
 ---
 
+**M4-5 state (2026-10-08):** built-in/custom persona commands, persistent
+selection, and `:plan` → `:go` are implemented and review-hardened. Native pi 1.0.4 against an
+isolated loopback API verifies tool schemas, transcript tool deltas, normal-tool
+restoration, and unchanged visible user messages without respawning.
+[Evidence and reproduction](spikes/M4-personas.md). This local M4 implementation
+does not satisfy the remaining M3 human/release gates or authorize publication.
+
 ## M5 — Hardening → 1.0 (ongoing)
 
 | ID | Task | Notes |

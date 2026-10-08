@@ -20,7 +20,7 @@ but **0.1.0 has not shipped**.
 | **M1 — Design spikes** | Complete for measured decisions | S1 lifecycle; S2 pool economics; S3 safe cwd policy; S4–S7 shell/addon/tty mechanics; S8 macOS/Linux startup; S9 bridge/tools/UI. Eleven reviewed native pi fixtures. | Broader terminal/addon versions and long-held native dialog/cancellation hardening; these do not become verified merely because replay passes. |
 | **M2 — Core** | Complete | Backend-independent AgentPort, fake and pi adapters, bridge, daemon/pool/store, foreground client, safe directives, renderer, CLI, and contracts; cumulative usage/cache-cost accounting, verified live provider/model selection, and resume/bridge/UI fixes. | Ongoing hardening, including long-held native dialog timeout/cancellation. |
 | **M3 — Triple-shell MVP → 0.1.0** | Implemented; acceptance in progress | zsh/fish/bash plugins, bash 3.2 fallback, MVP commands, pickers, prompt status, doctor, setup/uninstall, docs, and passing macOS/Linux shell/version and performance CI at `72d512b`. | Fresh release-artifact CI/stability, human walkthrough/daily-use checks, required-check enforcement, release preparation, and explicit publishing approval. |
-| **M4 — Parity and beyond Forge** | Planned | Foundations from the core and MVP. | Command suggestions and commit drafting, detach/attach, steering, personas, completions, TUI handoff, additional conversation commands, richer context capture, and terminal polish. |
+| **M4 — Parity and beyond Forge** | In progress | Built-in/custom personas and `:plan` → `:go`, with native tool/transcript verification. | Command suggestions and commit drafting, detach/attach, steering, completions, TUI handoff, additional conversation commands, richer context capture, and terminal polish. |
 | **M5 — Hardening → 1.0** | Planned | Backend abstraction and safety checks to build on. | A second adapter and backend switching, security review, wider distribution/docs site, WSL/terminal validation, and conditional compiled-client/ble.sh work. |
 
 [S1](docs/spikes/S1-pi-rpc-lifecycle.md) combines real Kimi turns with native pi
@@ -157,10 +157,47 @@ command; an unknown tight name reports suggestions rather than prompting a model
 | Set reasoning (`:think`) | `:think [level]`; levels come from the backend |
 | Inspect context (`:info`, `:i`) | Model, thinking, root, usage, backend, daemon |
 | Copy the answer (`:copy`) | `:copy` via pbcopy, wl-copy, xclip, or terminal OSC 52 |
+| Read-only answer or plan | `:ask <question>`, `:plan <task>` |
+| Execute the completed plan | `:go` in the same conversation and workspace |
+| Custom persona | `:<name> <text>` from `[personas.<name>]` |
 | Help (`:help`, `:?`) | `:help`; agent commands are included when connected |
 | Diagnose the installation | `:doctor` or `prefaix doctor` |
 | Run a pi command or skill | `:/command [args]`, e.g. `:/skill:review` |
 | Suggest, commit, detach/attach, TUI handoff | Planned for M4 |
+
+## Personas
+
+`:ask <question>` uses read-only tools to answer, and `:plan <task>` produces a
+numbered plan without modifying files. The selected persona belongs to the
+conversation: ordinary `: <text>` prompts keep it, including after the child
+is evicted or restarted. `:info` shows the active persona.
+
+After a successful, nonempty planning answer, `:go` sends an execution prompt
+with the backend's normal tools in **the same conversation and workspace**.
+It takes no arguments and refuses missing, failed, already-executed, or
+cross-workspace plans. To refine a plan before executing, send another prompt;
+to leave a persona without executing a plan, start a fresh `:new` conversation.
+
+Add custom personas in `~/.config/prefaix/config.toml`:
+
+```toml
+[personas.audit]
+tools = ["read", "grep", "find", "ls"]
+guideline = "Audit dependencies and report risks. Do not modify files."
+```
+
+Then use `:audit inspect the dependencies`. Custom entries retain the built-in
+personas; explicitly defining `[personas.ask]` or `[personas.plan]` replaces
+that entry completely. Omitted `tools` means the backend's normal tool set;
+`tools = []` requests no tools. Use command-shaped names
+(`[A-Za-z][A-Za-z0-9_-]*`); built-in commands and aliases take precedence over
+colliding custom persona names. A bare persona name asks for a prompt, and
+unknown tight names suggest configured personas as well as commands.
+
+Pi switches tools in place when the bridge loads. Without it, persona changes
+resume the native conversation in a replacement child with spawn-time tools.
+**Personas are a convenience, not a sandbox or security boundary.** User
+overrides and backend extensions can change their behavior.
 
 ## Prompt integration
 
@@ -214,6 +251,7 @@ remains supported.
 | Invalid config | `prefaix config check` names the invalid key or TOML location. |
 | Daemon unavailable after a crash | Try another prompt (autospawn recovers); inspect startup with `prefaix daemon --foreground`. |
 | Runtime permissions rejected | Your runtime directory must be owned by you and mode 0700; its socket must be mode 0600. |
+| Turn context cannot reach the pi bridge | Restore access to the runtime turns directory and retry. The prompt was not sent; persona restrictions never fall back to prose alone. |
 | Clipboard unavailable | Install `wl-clipboard` (Wayland) or `xclip` (X11), or enable OSC 52 clipboard support in your terminal. |
 | Empty model picker | Configure provider credentials in pi. |
 

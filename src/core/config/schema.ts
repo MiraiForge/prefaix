@@ -313,6 +313,13 @@ function cloneTableEntry(entry: unknown): unknown {
   return out;
 }
 
+export function mapDefaults(node: MapNode): Record<string, unknown> {
+  const table: Record<string, unknown> = {};
+  for (const [name, entry] of Object.entries(node.defaults ?? {}))
+    table[name] = cloneTableEntry(entry);
+  return table;
+}
+
 export function memberDefaults(members: Members): Record<string, ConfigValue> {
   const out: Record<string, ConfigValue> = {};
   for (const [key, node] of Object.entries(members)) {
@@ -323,11 +330,7 @@ export function memberDefaults(members: Members): Record<string, ConfigValue> {
         node.members,
       ) as unknown as ConfigValue;
     } else {
-      const table: Record<string, unknown> = {};
-      for (const [name, entry] of Object.entries(node.defaults ?? {})) {
-        table[name] = cloneTableEntry(entry);
-      }
-      out[camelize(key)] = table as unknown as ConfigValue;
+      out[camelize(key)] = mapDefaults(node) as unknown as ConfigValue;
     }
   }
   return out;

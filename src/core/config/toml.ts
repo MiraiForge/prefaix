@@ -14,6 +14,7 @@ import {
   type Node,
   isNode,
   memberDefaults,
+  mapDefaults,
 } from "./schema.js";
 import {
   fileDiagnostic,
@@ -232,7 +233,7 @@ function readNode(
   if (node.type === "section") {
     return readMembers(node.members, value, path, context);
   }
-  return readMap(node.entry, value, path, context);
+  return readMap(node.entry, value, path, context, mapDefaults(node));
 }
 
 function readMembers(
@@ -270,15 +271,17 @@ function readMap(
   value: unknown,
   path: string,
   context: ReadContext,
+  defaults: Record<string, unknown>,
 ): Record<string, unknown> {
   if (value === undefined) {
-    return {};
+    return defaults;
   }
   if (!isPlainObject(value)) {
     report(context, path, `expected a table, got ${describeValue(value)}`);
-    return {};
+    return defaults;
   }
-  const out: Record<string, unknown> = {};
+  // Defining one persona replaces that entry, not the whole shipped map.
+  const out = defaults;
   for (const [name, member] of Object.entries(value)) {
     out[name] = readMembers(
       entry,

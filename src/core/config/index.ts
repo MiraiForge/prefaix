@@ -194,7 +194,9 @@ export function personaSpec(
   config: PrefaixConfig,
   name: string,
 ): PersonaSpec | undefined {
-  const entry = config.personas[name];
+  const entry = Object.hasOwn(config.personas, name)
+    ? config.personas[name]
+    : undefined;
   if (entry === undefined) {
     return undefined;
   }

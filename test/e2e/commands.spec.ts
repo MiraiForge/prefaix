@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultConfig } from "../../src/core/config/schema.js";
+import type { FakeSession } from "../../src/agents/fake/adapter.js";
+import { PLAN_EXECUTION_PROMPT } from "../../src/core/protocol.js";
 import { resolvePaths } from "../../src/core/paths.js";
 import { Daemon } from "../../src/daemon/daemon.js";
 import { initShell } from "../../src/shells/plugins/index.js";
@@ -58,13 +60,17 @@ async function start() {
   mkdirSync(join(home, "config", "prefaix"), { recursive: true });
   writeFileSync(
     paths.configFile,
-    '[ui]\nrprompt = "off"\npicker = "builtin"\n',
+    '[ui]\nrprompt = "off"\npicker = "builtin"\n[personas.audit]\ntools = ["read"]\nguideline = "Audit dependencies."\n',
   );
   const defaults = defaultConfig();
   const config = {
     ...defaults,
     agent: { ...defaults.agent, backend: "fake" as const },
     ui: { ...defaults.ui, rprompt: "off" as const, picker: "builtin" as const },
+    personas: {
+      ...defaults.personas,
+      audit: { tools: ["read"], guideline: "Audit dependencies." },
+    },
   };
   daemon = new Daemon({ paths, config, version: "0.0.0", checkOwner: false });
   await daemon.start();
@@ -84,7 +90,7 @@ async function command(s: ShellSession, line: string): Promise<string> {
   return s.screenText();
 }
 
-describe(`${kind} MVP commands with the installed client and fake backend`, () => {
+describe(`${kind} commands with the installed client and fake backend`, () => {
   it("continues turns, starts new conversations, switches and toggles, and renders info/status", async () => {
     const s = await start();
     expect(await command(s, ": explain the code")).toContain(
@@ -155,6 +161,43 @@ describe(`${kind} MVP commands with the installed client and fake backend`, () =
       "agent commands (cached for this conversation)",
     );
     expect(s.screenText()).toContain(":review");
+  });
+
+  it("routes personas and :go through the real shell without changing conversations", async () => {
+    const s = await start();
+    expect(await command(s, ":ask explain this")).toContain(
+      "Hello from the fake backend",
+    );
+    const id = await s.readVariable("PREFAIX_CONVERSATION_ID");
+    expect(id, s.screenText()).toMatch(/^c_/u);
+    const session = daemon!.pool.session(id) as FakeSession;
+    expect(session.lastPrompt?.persona?.tools).toEqual([
+      "read",
+      "grep",
+      "find",
+      "ls",
+    ]);
+    await command(s, ":audit the dependencies");
+    expect(daemon!.pool.session(id)).toBe(session);
+    expect(session.lastPrompt?.persona).toMatchObject({
+      name: "audit",
+      tools: ["read"],
+    });
+    expect(await command(s, ":audti dependencies")).toContain(
+      "Did you mean :audit?",
+    );
+    expect(session.turnsRun).toBe(2);
+    await command(s, ":plan refactor this");
+    expect(session.persona?.name).toBe("plan");
+    expect(await command(s, ":info")).toContain("persona: plan");
+    await command(s, ":go");
+    expect(await s.readVariable("PREFAIX_CONVERSATION_ID")).toBe(id);
+    expect(daemon!.pool.session(id)).toBe(session);
+    expect(session.persona).toBeUndefined();
+    expect(session.lastPrompt?.text).toBe(PLAN_EXECUTION_PROMPT);
+    expect(await command(s, ":info")).toContain("persona: default");
+    expect(await command(s, ":go")).toContain("no completed plan");
+    expect(session.turnsRun).toBe(4);
   });
 
   it("opens and cancels the built-in conversation/model pickers with a usable prompt", async () => {

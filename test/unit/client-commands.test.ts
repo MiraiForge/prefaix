@@ -13,7 +13,12 @@ import { run, statusLabel, type RunOptions } from "../../src/client/run.js";
 import { PrefaixError } from "../../src/core/errors.js";
 import { Daemon } from "../../src/daemon/daemon.js";
 import { DaemonClient } from "../../src/client/connection.js";
-import { defaultConfig } from "../../src/core/config/schema.js";
+import {
+  defaultConfig,
+  type PrefaixConfig,
+} from "../../src/core/config/schema.js";
+import type { FakeSession } from "../../src/agents/fake/adapter.js";
+import { PLAN_EXECUTION_PROMPT } from "../../src/core/protocol.js";
 import {
   resolvePaths,
   shellHintsFile,
@@ -51,6 +56,10 @@ function input() {
 function directives() {
   return decodeDirectives(readFileSync(join(home, "directives")))!;
 }
+function activeSession() {
+  return daemon!.pool.session(directives().conversation!) as FakeSession;
+}
+
 function cachedStatus() {
   return readFileSync(shellRuntimeFiles(paths, "1-1-a").status, "utf8").trim();
 }
@@ -92,10 +101,13 @@ function invoke(
     ...options,
   });
 }
-async function start(env: Record<string, string> = {}) {
+async function start(
+  env: Record<string, string> = {},
+  settings: PrefaixConfig = config,
+) {
   daemon = new Daemon({
     paths,
-    config,
+    config: settings,
     version: "test",
     checkOwner: false,
     env: { PATH: "/usr/bin", HOME: home, ...env },
@@ -115,6 +127,99 @@ afterEach(async () => {
   await daemon?.stop();
   daemon = undefined;
   rmSync(home, { recursive: true, force: true });
+});
+
+describe("persona command workflows", () => {
+  it("routes built-ins, preserves the persona, and executes a plan in the same conversation", async () => {
+    await start();
+    expect(await invoke(":ask why is this slow")).toBe(0);
+    const conversation = directives().conversation!;
+    const original = activeSession();
+    expect(original.lastPrompt?.persona?.tools).toEqual([
+      "read",
+      "grep",
+      "find",
+      "ls",
+    ]);
+    expect(original.lastPrompt?.text).toBe("why is this slow");
+    expect(await invoke(": what about this?", conversation)).toBe(0);
+    expect(original.lastPrompt?.persona?.name).toBe("ask");
+    expect(await invoke(":plan refactor it", conversation)).toBe(0);
+    expect(original.lastPrompt?.persona?.name).toBe("plan");
+    expect(await invoke(":info", conversation)).toBe(0);
+    expect(output.join("")).toContain("persona: plan");
+    expect(await invoke(":go", conversation)).toBe(0);
+    expect(directives().conversation).toBe(conversation);
+    expect(activeSession()).toBe(original);
+    expect(original.lastPrompt?.text).toBe(PLAN_EXECUTION_PROMPT);
+    expect(original.persona).toBeUndefined();
+    output = [];
+    expect(await invoke(":info", conversation)).toBe(0);
+    expect(output.join("")).toContain("persona: default");
+  });
+
+  it("routes configured personas and suggests misspelled names without prompting", async () => {
+    const custom = {
+      ...config,
+      personas: {
+        ...config.personas,
+        audit: { tools: ["read"], guideline: "Audit dependencies." },
+      },
+    };
+    await start({}, custom);
+    expect(
+      await invoke(":audit the deps\nverbatim second line", "", {
+        config: custom,
+      }),
+    ).toBe(0);
+    expect(activeSession().lastPrompt).toMatchObject({
+      text: "the deps\nverbatim second line",
+      persona: {
+        name: "audit",
+        tools: ["read"],
+        guideline: "Audit dependencies.",
+      },
+    });
+    const conversation = directives().conversation!;
+    const original = activeSession();
+    expect(
+      await invoke(":audti the deps", conversation, { config: custom }),
+    ).toBe(2);
+    expect(errors.join("")).toContain("Did you mean :audit?");
+    expect(original.turnsRun).toBe(1);
+  });
+
+  it.each([":ask", ":plan", ":audit"])(
+    "asks for missing persona text with %s",
+    async (line) => {
+      const custom = {
+        ...config,
+        personas: {
+          ...config.personas,
+          audit: { tools: ["read"], guideline: null },
+        },
+      };
+      await start({}, custom);
+      expect(await invoke(line, "", { config: custom })).toBe(2);
+      expect(errors.join("")).toContain("requires a prompt");
+      expect(errors.join("")).toContain(`${line} <text>`);
+      expect(await daemon!.store.list()).toHaveLength(0);
+    },
+  );
+
+  it("refuses :go before a plan, after an ordinary answer, and with arguments", async () => {
+    await start();
+    expect(await invoke(":go")).toBe(2);
+    expect(errors.join("")).toContain(":plan <task>");
+    expect(await daemon!.store.list()).toHaveLength(0);
+    expect(await invoke(": explain")).toBe(0);
+    const conversation = directives().conversation!;
+    expect(await invoke(":go", conversation)).toBe(2);
+    expect(errors.join("")).toContain("no completed plan");
+    expect(await invoke(":go extra", conversation)).toBe(2);
+    expect(errors.join("")).toContain("does not take arguments");
+    expect(daemon!.pool.session(conversation)).toMatchObject({ turnsRun: 1 });
+  });
 });
 
 describe("MVP command workflows", () => {

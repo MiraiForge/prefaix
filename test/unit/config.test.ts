@@ -652,6 +652,36 @@ describe("loadConfig", () => {
   });
 });
 
+describe("persona map overrides", () => {
+  it("adds custom entries without dropping built-ins, and replaces only explicitly defined built-in entries", () => {
+    const resolved = resolveConfig({
+      text: '[personas.audit]\ntools = ["read"]\nguideline = "Audit dependencies."\n[personas.ask]\ntools = []\n',
+      env: { PREFAIX_PERSONAS_PLAN_GUIDELINE: "Make a careful plan." },
+    });
+    expect(resolved.diagnostics).toEqual([]);
+    expect(resolved.config.personas["ask"]).toEqual({
+      tools: [],
+      guideline: null,
+    });
+    expect(resolved.config.personas["audit"]).toEqual({
+      tools: ["read"],
+      guideline: "Audit dependencies.",
+    });
+    expect(resolved.config.personas["plan"]).toEqual({
+      tools: ["read", "grep", "find", "ls"],
+      guideline: "Make a careful plan.",
+    });
+    expect(defaultConfig().personas["ask"]?.tools).toEqual([
+      "read",
+      "grep",
+      "find",
+      "ls",
+    ]);
+    expect(personaSpec(resolved.config, "toString")).toBeUndefined();
+    expect(personaSpec(resolved.config, "constructor")).toBeUndefined();
+  });
+});
+
 describe("personaSpec", () => {
   it("omits keys the config left unset", () => {
     const config = resolveConfig({

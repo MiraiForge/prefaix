@@ -37,10 +37,16 @@ export interface TurnStartParams {
   cwd: string;
   env: Record<string, string>;
   text: string;
-  persona?: string;
+  /** Omitted retains the conversation persona; null restores normal tools. */
+  persona?: string | null;
+  /** Execute a completed plan in this exact conversation, with normal tools. */
+  executePlan?: boolean;
   context: TurnContextPayload;
   onDisconnect?: "abort" | "continue";
 }
+
+export const PLAN_EXECUTION_PROMPT =
+  "Execute the plan above. Use the normal tools to implement it.";
 
 export interface TurnAbortParams {
   turnId: string;
