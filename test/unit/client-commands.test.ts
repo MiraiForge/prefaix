@@ -17,7 +17,7 @@ import {
   defaultConfig,
   type PrefaixConfig,
 } from "../../src/core/config/schema.js";
-import type { FakeSession } from "../../src/agents/fake/adapter.js";
+import { FakeSession } from "../../src/agents/fake/adapter.js";
 import { PLAN_EXECUTION_PROMPT } from "../../src/core/protocol.js";
 import {
   resolvePaths,
@@ -486,41 +486,94 @@ describe("MVP command workflows", () => {
     ).toBe(0);
     expect(await invoke(":model fake/fake-fast", id, { connect })).toBe(0);
   });
-  it("does not mutate model settings while another shell owns a turn", async () => {
-    await start();
-    await invoke(":new");
-    const id = directives().conversation!;
-    const client = new DaemonClient({ paths, version: "test" });
-    await client.connect();
-    const terminal = input();
-    const pending = invoke(": a long request", id, {
-      tty: terminal.tty,
-      env: { PATH: "/usr/bin", PREFAIX_FAKE_SCENARIO: "long" },
-    });
-    await vi.waitFor(async () =>
-      expect(
-        (
-          await client.call<{ state: string }>("status.get", {
+  it.each([0, 2_000])(
+    "does not mutate model settings while another shell owns a turn (metadata pause %ims)",
+    async (metadataPauseMs) => {
+      await start();
+      await invoke(":new");
+      const id = directives().conversation!;
+      const client = new DaemonClient({ paths, version: "test" });
+      await client.connect();
+      const terminal = input();
+      let entered!: () => void;
+      let release!: () => void;
+      const running = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const prompt = FakeSession.prototype.prompt;
+      // Keep a genuinely started fake turn alive until the real abort RPC is
+      // acknowledged. Slow metadata/coverage work cannot race natural settle.
+      const held = vi
+        .spyOn(FakeSession.prototype, "prompt")
+        .mockImplementation(async function* (this: FakeSession, input, signal) {
+          const iterator = prompt.call(this, input, signal);
+          try {
+            const first = await iterator.next();
+            expect(first.done).toBe(false);
+            if (first.done) return;
+            yield first.value;
+            entered();
+            await gate;
+            yield* iterator;
+          } finally {
+            await iterator.return(undefined);
+          }
+        });
+      const pending = invoke(": a long request", id, {
+        tty: terminal.tty,
+        env: { PATH: "/usr/bin", PREFAIX_FAKE_SCENARIO: "long" },
+        connect: (options) => {
+          const foreground = new DaemonClient(options);
+          const call = foreground.call.bind(foreground);
+          foreground.call = async (op, params) => {
+            const result = await call(op, params);
+            if (op === "turn.abort") release();
+            return result as never;
+          };
+          return foreground;
+        },
+      });
+      try {
+        await running;
+        expect(
+          (
+            await client.call<{ state: string }>("status.get", {
+              conversationId: id,
+            })
+          ).state,
+        ).toBe("busy");
+        await expect(
+          client.call("model.set", {
             conversationId: id,
-          })
-        ).state,
-      ).toBe("busy"),
-    );
-    await expect(
-      client.call("model.set", {
-        conversationId: id,
-        ref: { provider: "fake", id: "fake-fast" },
-      }),
-    ).rejects.toThrow(/wait for/u);
-    await expect(
-      client.call("thinking.set", { conversationId: id, level: "low" }),
-    ).rejects.toThrow(/wait for/u);
-    const listed = await client.call<{ models: unknown[] }>("model.list", {});
-    expect(listed.models.length).toBeGreaterThan(0);
-    terminal.send("\u0003");
-    expect(await pending).toBe(130);
-    client.close();
-  });
+            ref: { provider: "fake", id: "fake-fast" },
+          }),
+        ).rejects.toThrow(/wait for/u);
+        await expect(
+          client.call("thinking.set", { conversationId: id, level: "low" }),
+        ).rejects.toThrow(/wait for/u);
+        // Deliberately outlast the old timer-paced scenario as a regression.
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, metadataPauseMs),
+        );
+        const listed = await client.call<{ models: unknown[] }>("model.list", {
+          conversationId: id,
+        });
+        expect(listed.models.length).toBeGreaterThan(0);
+        terminal.send("\u0003");
+        expect(await pending).toBe(130);
+        expect(terminal.modes).toEqual([true, false]);
+      } finally {
+        terminal.send("\u0003");
+        release();
+        await pending;
+        held.mockRestore();
+        client.close();
+      }
+    },
+  );
   it("handles invalid daemon-side levels and cold status values", async () => {
     await start();
     await invoke(":new topic");
