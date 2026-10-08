@@ -149,9 +149,12 @@ that basis.
 
 M3 feature implementation and its automated gates are present; acceptance is
 still in progress. Allan approved a Node 26 idle-memory exception. Historical
-macOS/Linux CI at `72d512b` passed; latest-main `e2aaa27` failed the busy-turn
-fixture and macOS Node 22 budgets. Local follow-up fixes do not establish fresh
-CI acceptance. Required-check enforcement and human acceptance remain required.
+Exact-head macOS/Linux CI at `d2de470` now passes all 18 jobs, including four frozen
+50/50 native stability gates (200 reruns, zero failures), with the busy-turn
+fixture and macOS Node 22 budgets corrected. Strict `M3 required checks` are
+GitHub Actions-bound and enforced on `main`, including administrators. That
+exact committed artifact is validated; later code and the eventual release
+artifact need their own current evidence. Human acceptance remains required.
 The [validation guide](VALIDATION.md) describes the native version
 matrix, stability runs, and performance method, and the
 [release gate](RELEASE.md) separates local evidence from Linux CI, required-check
@@ -189,8 +192,10 @@ does not satisfy the remaining M3 human/release gates or authorize publication.
 verification](spikes/native-dialogs.md) now covers deadlines, signal/method abort,
 and silent preflight timeout without orphaned requests. Safe abort terminates
 the owned child and resumes its native conversation on a replacement. This is
-not graceful native hook cancellation or a waiver of the M3 gate; the other
-M4 groups remain dependency-blocked on M3 CI acceptance.
+not graceful native hook cancellation or a waiver of the M3 release gate.
+The automated M3 CI dependency is now satisfied, so the remaining M4 groups
+are ready for implementation, not completed. Human/release acceptance stays
+separate.
 
 ## M5 — Hardening → 1.0 (ongoing)
 

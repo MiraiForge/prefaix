@@ -1,0 +1,2611 @@
+{
+  "workflow": "CI",
+  "repository": "MiraiForge/prefaix",
+  "url": "https://github.com/MiraiForge/prefaix/actions/runs/37733087814",
+  "headSha": "d2de470fbdfacd2ef6fcff6e62c2cfbba2b462cc",
+  "attempt": 1,
+  "conclusion": "success",
+  "reviewedAt": "2026-10-08",
+  "scope": "Exact committed head. Fake/fixture performance and shell behavior; current native pi no-model probe. Not human acceptance, natural-model measurements or release approval.",
+  "productionArtifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+  "jobs": [
+    {
+      "name": "Check (ubuntu-latest, Node 26)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Pi no-model smoke",
+      "conclusion": "success"
+    },
+    {
+      "name": "Shells (ubuntu-latest, bash 4.4, fish 3.6.4)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Shells (ubuntu-latest, bash 5.2, fish 4.0.2)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Performance (macos-15, Node 26)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Performance (ubuntu-24.04, Node 24)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Shells (macos-latest, bash 4.4, fish 3.6.4)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Check (ubuntu-latest, Node 22)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Performance (macos-15, Node 22)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Check (macos-latest, Node 22)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Check (macos-latest, Node 24)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Check (ubuntu-latest, Node 24)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Performance (macos-15, Node 24)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Shells (macos-latest, bash 5.2, fish 4.0.2)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Performance (ubuntu-24.04, Node 22)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Check (macos-latest, Node 26)",
+      "conclusion": "success"
+    },
+    {
+      "name": "Performance (ubuntu-24.04, Node 26)",
+      "conclusion": "success"
+    },
+    {
+      "name": "M3 required checks",
+      "conclusion": "success"
+    }
+  ],
+  "reports": [
+    {
+      "artifact": "startup-macos-15-node22",
+      "file": "prefaix-startup.json",
+      "sha256": "895093fee858c4347f32ce2d409622afa0660c7c984dd780ab3836229e6dacb3",
+      "samples": 50,
+      "platform": "darwin",
+      "node": "v22.23.2",
+      "method": "Fresh processes connect to a local Unix socket, print its greeting, and exit. One warmup per runtime excluded; alternate runtime order. helloMs ends when the parent observes the child's received greeting; exitMs includes process shutdown. This is a loader/socket floor, not the full production client or a model request.",
+      "bun": "1.3.14",
+      "variants": {
+        "node-bundle": {
+          "artifact": {
+            "bytes": 322,
+            "sha256": "a06ea2be8c5df7f6152678d8ce6531c1f8631a914463b49fa2f6d596451f7fcb"
+          },
+          "helloMs": {
+            "p50": 30.20287499999995,
+            "p95": 43.13762500000007
+          },
+          "exitMs": {
+            "p50": 32.62904199999991,
+            "p95": 45.703207999999904
+          }
+        },
+        "bun-compiled": {
+          "artifact": {
+            "bytes": 63446114,
+            "sha256": "ec42c0a841098feff49b3405755a0cbb0b5a4f6d3a2603d5f4dbd9c3b99b7b9b"
+          },
+          "helloMs": {
+            "p50": 23.076583000000028,
+            "p95": 35.62758300000041
+          },
+          "exitMs": {
+            "p50": 24.611625000000004,
+            "p95": 37.98991600000011
+          }
+        }
+      },
+      "rawSamples": "All 50 per variant retained in the named public CI artifact; hash covers the full original report."
+    },
+    {
+      "artifact": "startup-macos-15-node24",
+      "file": "prefaix-startup.json",
+      "sha256": "aca25a0f685f12663345bba7dd401f0b4e719028ab22b94831f0cff4d9cb3f51",
+      "samples": 50,
+      "platform": "darwin",
+      "node": "v24.20.0",
+      "method": "Fresh processes connect to a local Unix socket, print its greeting, and exit. One warmup per runtime excluded; alternate runtime order. helloMs ends when the parent observes the child's received greeting; exitMs includes process shutdown. This is a loader/socket floor, not the full production client or a model request.",
+      "bun": "1.3.14",
+      "variants": {
+        "node-bundle": {
+          "artifact": {
+            "bytes": 322,
+            "sha256": "9b58bdbe0a404a58bf9abea4d747ae416733554b5f7ecdad0f3014a86c08260b"
+          },
+          "helloMs": {
+            "p50": 43.29374999999982,
+            "p95": 56.12141700000029
+          },
+          "exitMs": {
+            "p50": 45.72412499999973,
+            "p95": 61.24499999999989
+          }
+        },
+        "bun-compiled": {
+          "artifact": {
+            "bytes": 63446114,
+            "sha256": "6fab8097d8e4bd79b51b3863fdc12127caa01c974612268509e6bc5b4c5cf261"
+          },
+          "helloMs": {
+            "p50": 32.212125000000015,
+            "p95": 42.45366699999977
+          },
+          "exitMs": {
+            "p50": 34.09562499999993,
+            "p95": 44.16591700000026
+          }
+        }
+      },
+      "rawSamples": "All 50 per variant retained in the named public CI artifact; hash covers the full original report."
+    },
+    {
+      "artifact": "startup-macos-15-node26",
+      "file": "prefaix-startup.json",
+      "sha256": "2641d5bc5b851cf66e1fe6838b410c2e1909b9de982aa785924ac2bcbfb7f281",
+      "samples": 50,
+      "platform": "darwin",
+      "node": "v26.11.1",
+      "method": "Fresh processes connect to a local Unix socket, print its greeting, and exit. One warmup per runtime excluded; alternate runtime order. helloMs ends when the parent observes the child's received greeting; exitMs includes process shutdown. This is a loader/socket floor, not the full production client or a model request.",
+      "bun": "1.3.14",
+      "variants": {
+        "node-bundle": {
+          "artifact": {
+            "bytes": 322,
+            "sha256": "90b1d7a96bfec9f2c472c2e18477be7fe5192418641206bb3dee6e4cff3d0b67"
+          },
+          "helloMs": {
+            "p50": 41.505499999999756,
+            "p95": 66.56058400000006
+          },
+          "exitMs": {
+            "p50": 45.49395800000002,
+            "p95": 70.56654200000003
+          }
+        },
+        "bun-compiled": {
+          "artifact": {
+            "bytes": 63446114,
+            "sha256": "8ec6ebdb8e6438e8c53e3b9f118b136a496a05f965d1f5d922262487b259fff0"
+          },
+          "helloMs": {
+            "p50": 30.220874999999978,
+            "p95": 56.12116700000024
+          },
+          "exitMs": {
+            "p50": 32.13087500000029,
+            "p95": 60.293916999999965
+          }
+        }
+      },
+      "rawSamples": "All 50 per variant retained in the named public CI artifact; hash covers the full original report."
+    },
+    {
+      "artifact": "startup-ubuntu-24.04-node22",
+      "file": "prefaix-startup.json",
+      "sha256": "188e2199a6d43b5252b8d22503adafe4179da7138cce85fd7530691db11afba8",
+      "samples": 50,
+      "platform": "linux",
+      "node": "v22.23.3",
+      "method": "Fresh processes connect to a local Unix socket, print its greeting, and exit. One warmup per runtime excluded; alternate runtime order. helloMs ends when the parent observes the child's received greeting; exitMs includes process shutdown. This is a loader/socket floor, not the full production client or a model request.",
+      "bun": "1.3.14",
+      "variants": {
+        "node-bundle": {
+          "artifact": {
+            "bytes": 270,
+            "sha256": "73108b1b2ba75f673bd936c5fa97ddd7983da851442f37b1eecd04358dac4bf8"
+          },
+          "helloMs": {
+            "p50": 27.206120000000283,
+            "p95": 30.83237599999984
+          },
+          "exitMs": {
+            "p50": 30.59004300000015,
+            "p95": 33.920138999999836
+          }
+        },
+        "bun-compiled": {
+          "artifact": {
+            "bytes": 94582912,
+            "sha256": "153cf19fe03b93b7bba60f82caaa8d25948eb6bdf1848b291f13a7cc9d18cb30"
+          },
+          "helloMs": {
+            "p50": 28.630879999999706,
+            "p95": 38.12104599999998
+          },
+          "exitMs": {
+            "p50": 30.825230999999803,
+            "p95": 40.84894099999997
+          }
+        }
+      },
+      "rawSamples": "All 50 per variant retained in the named public CI artifact; hash covers the full original report."
+    },
+    {
+      "artifact": "startup-ubuntu-24.04-node24",
+      "file": "prefaix-startup.json",
+      "sha256": "44c9ea6bdb9665ce3e5dd2970ba817ec85129d7a4cdc183086e04d06acd891a5",
+      "samples": 50,
+      "platform": "linux",
+      "node": "v24.21.0",
+      "method": "Fresh processes connect to a local Unix socket, print its greeting, and exit. One warmup per runtime excluded; alternate runtime order. helloMs ends when the parent observes the child's received greeting; exitMs includes process shutdown. This is a loader/socket floor, not the full production client or a model request.",
+      "bun": "1.3.14",
+      "variants": {
+        "node-bundle": {
+          "artifact": {
+            "bytes": 270,
+            "sha256": "9da93de4140558b85cb47e4f94c2dc8fad1228de8efa0439833b69c89a9110c9"
+          },
+          "helloMs": {
+            "p50": 23.40634,
+            "p95": 28.16530499999999
+          },
+          "exitMs": {
+            "p50": 26.345060000000103,
+            "p95": 31.12434099999973
+          }
+        },
+        "bun-compiled": {
+          "artifact": {
+            "bytes": 94582912,
+            "sha256": "49edf31ac54d11b7c3e20d36b91cfb47c0c1880ac07eab9aab52bea96ab70223"
+          },
+          "helloMs": {
+            "p50": 25.781848999999966,
+            "p95": 32.972687000000406
+          },
+          "exitMs": {
+            "p50": 27.72074300000031,
+            "p95": 34.86060800000041
+          }
+        }
+      },
+      "rawSamples": "All 50 per variant retained in the named public CI artifact; hash covers the full original report."
+    },
+    {
+      "artifact": "startup-ubuntu-24.04-node26",
+      "file": "prefaix-startup.json",
+      "sha256": "e14c43e0682f547c8ea1a4b631f7c49d4b4aa6154f75b02ebbf4a689615b7a52",
+      "samples": 50,
+      "platform": "linux",
+      "node": "v26.11.1",
+      "method": "Fresh processes connect to a local Unix socket, print its greeting, and exit. One warmup per runtime excluded; alternate runtime order. helloMs ends when the parent observes the child's received greeting; exitMs includes process shutdown. This is a loader/socket floor, not the full production client or a model request.",
+      "bun": "1.3.14",
+      "variants": {
+        "node-bundle": {
+          "artifact": {
+            "bytes": 270,
+            "sha256": "1f5b9c138d03265d6ab5fe52e6fcd3fb1cfcc047ba5ec365ab0f5b94e7a87523"
+          },
+          "helloMs": {
+            "p50": 26.083848999999873,
+            "p95": 29.846972999999934
+          },
+          "exitMs": {
+            "p50": 29.7701790000001,
+            "p95": 33.61897399999998
+          }
+        },
+        "bun-compiled": {
+          "artifact": {
+            "bytes": 94582912,
+            "sha256": "88542ee90a57e14b4f093756e2316cca621b1ac1002cfe69c267b95ed803c52f"
+          },
+          "helloMs": {
+            "p50": 30.40789500000028,
+            "p95": 40.28713199999993
+          },
+          "exitMs": {
+            "p50": 33.199145000000044,
+            "p95": 43.48139200000014
+          }
+        }
+      },
+      "rawSamples": "All 50 per variant retained in the named public CI artifact; hash covers the full original report."
+    },
+    {
+      "artifact": "performance-macos-15-node22",
+      "file": "prefaix-performance.json",
+      "sha256": "7553cc9182a9e22e64de383701ae4a8aeceb37d80702ec098b89c76205623d95",
+      "samples": 50,
+      "platform": "darwin",
+      "node": "v22.23.2",
+      "report": {
+        "burst": {
+          "turns": 3,
+          "textEventsPerTurn": 2000,
+          "normalizedEventsPerTurn": 2004,
+          "elapsedMs": [
+            196.3361249999998, 75.05670800000007, 73.46075000000019
+          ],
+          "slowestEventsPerSecond": 10186.612372022733,
+          "idleRssMb": 47.59375,
+          "method": "Three timer-free 2000-delta fake turns through the real built daemon and CLI; exact ordered rendered text checked. Timing includes client startup and turn persistence; idle RSS follows 5 seconds of quiescence."
+        },
+        "platform": "darwin",
+        "arch": "arm64",
+        "osRelease": "24.6.0",
+        "cpu": "Apple M1 (Virtual)",
+        "artifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+        "node": "v22.23.2",
+        "samples": 50,
+        "clientHelloMs": {
+          "p50": 36.10029199999963,
+          "p95": 42.199583000000075
+        },
+        "warmFirstTokenMs": {
+          "p50": 61.18499999999949,
+          "p95": 69.95558300000039
+        },
+        "idleDaemonRssMb": 44.59375,
+        "postSamplesDaemonRssMb": 47.1875,
+        "warmIdleDaemonRssMb": 45.453125,
+        "idleRssLimitBytes": 60000000,
+        "idleMemoryBudget": {
+          "status": "passed",
+          "nodeMajor": 22,
+          "limitBytes": 60000000,
+          "limitMiB": 57.220458984375,
+          "overBudget": [],
+          "exception": null
+        },
+        "quiescenceMs": 5000,
+        "rssMethod": "OS ps resident-set size of the real daemon before its first client, after 50+ ordinary turns, and after three 2000-delta bursts; post-use measurements follow 5 seconds without clients. All three idle states are measured; Node 26 has an explicitly approved idle-RSS exception.",
+        "method": "Built Node CLI through a Unix-socket proxy to the real fake-backend daemon; first token includes fake pacing and renderer. One warmup excluded."
+      }
+    },
+    {
+      "artifact": "performance-macos-15-node24",
+      "file": "prefaix-performance.json",
+      "sha256": "4ac321aa2ed023f0b9f04994e7c153067b88548b846cf84963c0c4f02978a288",
+      "samples": 50,
+      "platform": "darwin",
+      "node": "v24.20.0",
+      "report": {
+        "burst": {
+          "turns": 3,
+          "textEventsPerTurn": 2000,
+          "normalizedEventsPerTurn": 2004,
+          "elapsedMs": [
+            167.91270799999984, 137.44950000000063, 111.5475830000014
+          ],
+          "slowestEventsPerSecond": 11910.950778067387,
+          "idleRssMb": 52.359375,
+          "method": "Three timer-free 2000-delta fake turns through the real built daemon and CLI; exact ordered rendered text checked. Timing includes client startup and turn persistence; idle RSS follows 5 seconds of quiescence."
+        },
+        "platform": "darwin",
+        "arch": "arm64",
+        "osRelease": "24.6.0",
+        "cpu": "Apple M1 (Virtual)",
+        "artifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+        "node": "v24.20.0",
+        "samples": 50,
+        "clientHelloMs": {
+          "p50": 51.47179099999994,
+          "p95": 75.22712500000034
+        },
+        "warmFirstTokenMs": {
+          "p50": 83.34720800000014,
+          "p95": 116.67745800000012
+        },
+        "idleDaemonRssMb": 48.390625,
+        "postSamplesDaemonRssMb": 51.453125,
+        "warmIdleDaemonRssMb": 51.453125,
+        "idleRssLimitBytes": 60000000,
+        "idleMemoryBudget": {
+          "status": "passed",
+          "nodeMajor": 24,
+          "limitBytes": 60000000,
+          "limitMiB": 57.220458984375,
+          "overBudget": [],
+          "exception": null
+        },
+        "quiescenceMs": 5000,
+        "rssMethod": "OS ps resident-set size of the real daemon before its first client, after 50+ ordinary turns, and after three 2000-delta bursts; post-use measurements follow 5 seconds without clients. All three idle states are measured; Node 26 has an explicitly approved idle-RSS exception.",
+        "method": "Built Node CLI through a Unix-socket proxy to the real fake-backend daemon; first token includes fake pacing and renderer. One warmup excluded."
+      }
+    },
+    {
+      "artifact": "performance-macos-15-node26",
+      "file": "prefaix-performance.json",
+      "sha256": "8b34cf8d06aeba2a4171642918fa130d03afb1350cd88e8bbaf96212a816f33f",
+      "samples": 50,
+      "platform": "darwin",
+      "node": "v26.11.1",
+      "report": {
+        "burst": {
+          "turns": 3,
+          "textEventsPerTurn": 2000,
+          "normalizedEventsPerTurn": 2004,
+          "elapsedMs": [
+            146.94837499999994, 108.27658399999927, 115.98504200000025
+          ],
+          "slowestEventsPerSecond": 13610.221957200962,
+          "idleRssMb": 58.921875,
+          "method": "Three timer-free 2000-delta fake turns through the real built daemon and CLI; exact ordered rendered text checked. Timing includes client startup and turn persistence; idle RSS follows 5 seconds of quiescence."
+        },
+        "platform": "darwin",
+        "arch": "arm64",
+        "osRelease": "24.6.0",
+        "cpu": "Apple M1 (Virtual)",
+        "artifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+        "node": "v26.11.1",
+        "samples": 50,
+        "clientHelloMs": {
+          "p50": 46.48541599999999,
+          "p95": 66.7014999999999
+        },
+        "warmFirstTokenMs": {
+          "p50": 76.8539580000006,
+          "p95": 95.17162499999995
+        },
+        "idleDaemonRssMb": 53.96875,
+        "postSamplesDaemonRssMb": 58.15625,
+        "warmIdleDaemonRssMb": 58.15625,
+        "idleRssLimitBytes": 60000000,
+        "idleMemoryBudget": {
+          "status": "allowlisted",
+          "nodeMajor": 26,
+          "limitBytes": 60000000,
+          "limitMiB": 57.220458984375,
+          "overBudget": [
+            {
+              "stage": "post-use",
+              "rssMiB": 58.15625
+            },
+            {
+              "stage": "post-burst",
+              "rssMiB": 58.921875
+            }
+          ],
+          "exception": {
+            "nodeMajor": 26,
+            "scope": "daemon idle RSS",
+            "reason": "Allan approved the Node 26 memory-budget exception."
+          }
+        },
+        "quiescenceMs": 5000,
+        "rssMethod": "OS ps resident-set size of the real daemon before its first client, after 50+ ordinary turns, and after three 2000-delta bursts; post-use measurements follow 5 seconds without clients. All three idle states are measured; Node 26 has an explicitly approved idle-RSS exception.",
+        "method": "Built Node CLI through a Unix-socket proxy to the real fake-backend daemon; first token includes fake pacing and renderer. One warmup excluded."
+      }
+    },
+    {
+      "artifact": "performance-ubuntu-24.04-node22",
+      "file": "prefaix-performance.json",
+      "sha256": "1bf3fe14e776a73bac4ff5c204e08286a821512ac4ed9a42990e04a226b879f2",
+      "samples": 50,
+      "platform": "linux",
+      "node": "v22.23.3",
+      "report": {
+        "burst": {
+          "turns": 3,
+          "textEventsPerTurn": 2000,
+          "normalizedEventsPerTurn": 2004,
+          "elapsedMs": [
+            687.1977490000008, 157.19091699999808, 74.79719799999657
+          ],
+          "slowestEventsPerSecond": 2910.370417991572,
+          "idleRssMb": 52.921875,
+          "method": "Three timer-free 2000-delta fake turns through the real built daemon and CLI; exact ordered rendered text checked. Timing includes client startup and turn persistence; idle RSS follows 5 seconds of quiescence."
+        },
+        "platform": "linux",
+        "arch": "x64",
+        "osRelease": "6.17.0-1022-azure",
+        "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+        "artifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+        "node": "v22.23.3",
+        "samples": 50,
+        "clientHelloMs": {
+          "p50": 37.5943870000001,
+          "p95": 40.85657700000047
+        },
+        "warmFirstTokenMs": {
+          "p50": 54.92254700000012,
+          "p95": 58.38474200000019
+        },
+        "idleDaemonRssMb": 50.2890625,
+        "postSamplesDaemonRssMb": 52.7578125,
+        "warmIdleDaemonRssMb": 52.7578125,
+        "idleRssLimitBytes": 60000000,
+        "idleMemoryBudget": {
+          "status": "passed",
+          "nodeMajor": 22,
+          "limitBytes": 60000000,
+          "limitMiB": 57.220458984375,
+          "overBudget": [],
+          "exception": null
+        },
+        "quiescenceMs": 5000,
+        "rssMethod": "OS ps resident-set size of the real daemon before its first client, after 50+ ordinary turns, and after three 2000-delta bursts; post-use measurements follow 5 seconds without clients. All three idle states are measured; Node 26 has an explicitly approved idle-RSS exception.",
+        "method": "Built Node CLI through a Unix-socket proxy to the real fake-backend daemon; first token includes fake pacing and renderer. One warmup excluded."
+      }
+    },
+    {
+      "artifact": "performance-ubuntu-24.04-node24",
+      "file": "prefaix-performance.json",
+      "sha256": "86b1b686a8296517ca1cccdd1569a6af1a340f0e04cce9e3849109df2927695c",
+      "samples": 50,
+      "platform": "linux",
+      "node": "v24.21.0",
+      "report": {
+        "burst": {
+          "turns": 3,
+          "textEventsPerTurn": 2000,
+          "normalizedEventsPerTurn": 2004,
+          "elapsedMs": [89.32945800000016, 62.47074000000066, 68.1498389999997],
+          "slowestEventsPerSecond": 22389.030951021738,
+          "idleRssMb": 54.140625,
+          "method": "Three timer-free 2000-delta fake turns through the real built daemon and CLI; exact ordered rendered text checked. Timing includes client startup and turn persistence; idle RSS follows 5 seconds of quiescence."
+        },
+        "platform": "linux",
+        "arch": "x64",
+        "osRelease": "6.17.0-1022-azure",
+        "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+        "artifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+        "node": "v24.21.0",
+        "samples": 50,
+        "clientHelloMs": {
+          "p50": 34.35335000000032,
+          "p95": 37.44398600000022
+        },
+        "warmFirstTokenMs": {
+          "p50": 51.5672169999998,
+          "p95": 54.6110749999998
+        },
+        "idleDaemonRssMb": 50.45703125,
+        "postSamplesDaemonRssMb": 53.6640625,
+        "warmIdleDaemonRssMb": 53.6640625,
+        "idleRssLimitBytes": 60000000,
+        "idleMemoryBudget": {
+          "status": "passed",
+          "nodeMajor": 24,
+          "limitBytes": 60000000,
+          "limitMiB": 57.220458984375,
+          "overBudget": [],
+          "exception": null
+        },
+        "quiescenceMs": 5000,
+        "rssMethod": "OS ps resident-set size of the real daemon before its first client, after 50+ ordinary turns, and after three 2000-delta bursts; post-use measurements follow 5 seconds without clients. All three idle states are measured; Node 26 has an explicitly approved idle-RSS exception.",
+        "method": "Built Node CLI through a Unix-socket proxy to the real fake-backend daemon; first token includes fake pacing and renderer. One warmup excluded."
+      }
+    },
+    {
+      "artifact": "performance-ubuntu-24.04-node26",
+      "file": "prefaix-performance.json",
+      "sha256": "7b2a0134bbcc7d1c8e3af20f1b14e5288b9f0bcd3780fd38211c0628a9efb78a",
+      "samples": 50,
+      "platform": "linux",
+      "node": "v26.11.1",
+      "report": {
+        "burst": {
+          "turns": 3,
+          "textEventsPerTurn": 2000,
+          "normalizedEventsPerTurn": 2004,
+          "elapsedMs": [
+            112.87588700000015, 85.10196499999984, 89.43746900000042
+          ],
+          "slowestEventsPerSecond": 17718.57615612799,
+          "idleRssMb": 56.1875,
+          "method": "Three timer-free 2000-delta fake turns through the real built daemon and CLI; exact ordered rendered text checked. Timing includes client startup and turn persistence; idle RSS follows 5 seconds of quiescence."
+        },
+        "platform": "linux",
+        "arch": "x64",
+        "osRelease": "6.17.0-1022-azure",
+        "cpu": "AMD EPYC 7763 64-Core Processor",
+        "artifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+        "node": "v26.11.1",
+        "samples": 50,
+        "clientHelloMs": {
+          "p50": 39.322483999999804,
+          "p95": 41.60144700000001
+        },
+        "warmFirstTokenMs": {
+          "p50": 57.23568400000022,
+          "p95": 59.69728899999973
+        },
+        "idleDaemonRssMb": 51.9921875,
+        "postSamplesDaemonRssMb": 55.97265625,
+        "warmIdleDaemonRssMb": 55.97265625,
+        "idleRssLimitBytes": 60000000,
+        "idleMemoryBudget": {
+          "status": "passed",
+          "nodeMajor": 26,
+          "limitBytes": 60000000,
+          "limitMiB": 57.220458984375,
+          "overBudget": [],
+          "exception": null
+        },
+        "quiescenceMs": 5000,
+        "rssMethod": "OS ps resident-set size of the real daemon before its first client, after 50+ ordinary turns, and after three 2000-delta bursts; post-use measurements follow 5 seconds without clients. All three idle states are measured; Node 26 has an explicitly approved idle-RSS exception.",
+        "method": "Built Node CLI through a Unix-socket proxy to the real fake-backend daemon; first token includes fake pacing and renderer. One warmup excluded."
+      }
+    }
+  ],
+  "stability": [
+    {
+      "artifact": "stability-macos-latest-bash4.4-fish3.6.4",
+      "summarySha256": "bbf348333c4e1d1b89c6ce42eb46425a0921e318ad02ab03d350da4e9480b79a",
+      "report": {
+        "platform": "darwin",
+        "node": "v24.20.0",
+        "artifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+        "suiteSha256": "3c65b9df70ac676bd0ab651f4a99365ad9a784055809adf27dfef23147aea2b9",
+        "concurrency": 1,
+        "startedAt": "2026-10-08T05:40:37.939Z",
+        "finishedAt": "2026-10-08T06:22:47.185Z",
+        "shells": {
+          "zsh": {
+            "binary": "zsh",
+            "version": "zsh 5.9 (arm64-apple-darwin25.0)"
+          },
+          "fish": {
+            "binary": "/Users/runner/work/_temp/fish/bin/fish",
+            "version": "fish, version 3.6.4"
+          },
+          "bash": {
+            "binary": "/Users/runner/work/_temp/bash/bin/bash",
+            "version": "GNU bash, version 4.4.0(1)-release (arm-apple-darwin25.6.0)"
+          }
+        },
+        "repeats": 50,
+        "failures": 0,
+        "failureRate": 0,
+        "runs": [
+          {
+            "run": 1,
+            "passed": true,
+            "ms": 54990
+          },
+          {
+            "run": 2,
+            "passed": true,
+            "ms": 52791
+          },
+          {
+            "run": 3,
+            "passed": true,
+            "ms": 52014
+          },
+          {
+            "run": 4,
+            "passed": true,
+            "ms": 52739
+          },
+          {
+            "run": 5,
+            "passed": true,
+            "ms": 52896
+          },
+          {
+            "run": 6,
+            "passed": true,
+            "ms": 52691
+          },
+          {
+            "run": 7,
+            "passed": true,
+            "ms": 51930
+          },
+          {
+            "run": 8,
+            "passed": true,
+            "ms": 52316
+          },
+          {
+            "run": 9,
+            "passed": true,
+            "ms": 53612
+          },
+          {
+            "run": 10,
+            "passed": true,
+            "ms": 52930
+          },
+          {
+            "run": 11,
+            "passed": true,
+            "ms": 53525
+          },
+          {
+            "run": 12,
+            "passed": true,
+            "ms": 54676
+          },
+          {
+            "run": 13,
+            "passed": true,
+            "ms": 53337
+          },
+          {
+            "run": 14,
+            "passed": true,
+            "ms": 53537
+          },
+          {
+            "run": 15,
+            "passed": true,
+            "ms": 53348
+          },
+          {
+            "run": 16,
+            "passed": true,
+            "ms": 52389
+          },
+          {
+            "run": 17,
+            "passed": true,
+            "ms": 52299
+          },
+          {
+            "run": 18,
+            "passed": true,
+            "ms": 52630
+          },
+          {
+            "run": 19,
+            "passed": true,
+            "ms": 50885
+          },
+          {
+            "run": 20,
+            "passed": true,
+            "ms": 51413
+          },
+          {
+            "run": 21,
+            "passed": true,
+            "ms": 48744
+          },
+          {
+            "run": 22,
+            "passed": true,
+            "ms": 48633
+          },
+          {
+            "run": 23,
+            "passed": true,
+            "ms": 48506
+          },
+          {
+            "run": 24,
+            "passed": true,
+            "ms": 46250
+          },
+          {
+            "run": 25,
+            "passed": true,
+            "ms": 48221
+          },
+          {
+            "run": 26,
+            "passed": true,
+            "ms": 47152
+          },
+          {
+            "run": 27,
+            "passed": true,
+            "ms": 49257
+          },
+          {
+            "run": 28,
+            "passed": true,
+            "ms": 46675
+          },
+          {
+            "run": 29,
+            "passed": true,
+            "ms": 50771
+          },
+          {
+            "run": 30,
+            "passed": true,
+            "ms": 52495
+          },
+          {
+            "run": 31,
+            "passed": true,
+            "ms": 47740
+          },
+          {
+            "run": 32,
+            "passed": true,
+            "ms": 49351
+          },
+          {
+            "run": 33,
+            "passed": true,
+            "ms": 50034
+          },
+          {
+            "run": 34,
+            "passed": true,
+            "ms": 51269
+          },
+          {
+            "run": 35,
+            "passed": true,
+            "ms": 49512
+          },
+          {
+            "run": 36,
+            "passed": true,
+            "ms": 48104
+          },
+          {
+            "run": 37,
+            "passed": true,
+            "ms": 49825
+          },
+          {
+            "run": 38,
+            "passed": true,
+            "ms": 47665
+          },
+          {
+            "run": 39,
+            "passed": true,
+            "ms": 48362
+          },
+          {
+            "run": 40,
+            "passed": true,
+            "ms": 47441
+          },
+          {
+            "run": 41,
+            "passed": true,
+            "ms": 49739
+          },
+          {
+            "run": 42,
+            "passed": true,
+            "ms": 49481
+          },
+          {
+            "run": 43,
+            "passed": true,
+            "ms": 49158
+          },
+          {
+            "run": 44,
+            "passed": true,
+            "ms": 48227
+          },
+          {
+            "run": 45,
+            "passed": true,
+            "ms": 50129
+          },
+          {
+            "run": 46,
+            "passed": true,
+            "ms": 49735
+          },
+          {
+            "run": 47,
+            "passed": true,
+            "ms": 48867
+          },
+          {
+            "run": 48,
+            "passed": true,
+            "ms": 50161
+          },
+          {
+            "run": 49,
+            "passed": true,
+            "ms": 49750
+          },
+          {
+            "run": 50,
+            "passed": true,
+            "ms": 50176
+          }
+        ]
+      },
+      "assertions": 3650,
+      "logs": [
+        {
+          "file": "run-1.log",
+          "sha256": "26d6e71ebef63db3a698e581b246a66a98d8d639f5b66a2ff0d5079f0430f1f0"
+        },
+        {
+          "file": "run-2.log",
+          "sha256": "068349a537e10c4e3890c1a616d973bc863a4400c76555721dc0b359b3267cf2"
+        },
+        {
+          "file": "run-3.log",
+          "sha256": "87c945079370c934337e7dfdbe5edf2d9413ab960523719c24015ee6a2522317"
+        },
+        {
+          "file": "run-4.log",
+          "sha256": "31668e3f294dd808e4aaebb476baa4284ae53e0a2409c874c411600fa128d6da"
+        },
+        {
+          "file": "run-5.log",
+          "sha256": "7f055ea67aa7914da691fcf82b1e4d5887df0a63db635a9ade3db854769d1176"
+        },
+        {
+          "file": "run-6.log",
+          "sha256": "97f9caf1a81c61bc5f5edef75fab41c4b2f11b89aabb2284da700f9288c0d4b5"
+        },
+        {
+          "file": "run-7.log",
+          "sha256": "c006541b6c2336e49ceba5e790cdbf54c3e60952b7d2f1fd7fef53b9d445628e"
+        },
+        {
+          "file": "run-8.log",
+          "sha256": "7f34127d6c65c1fdc1bd6b853df80d5b1cdccb69ff7bdfaa98dbdeda37232523"
+        },
+        {
+          "file": "run-9.log",
+          "sha256": "a54bf41d2649481644b21e179a40369304a9494dba3350c225137c9ffb374cda"
+        },
+        {
+          "file": "run-10.log",
+          "sha256": "5a5fa0758f2a0d9c1a054fd6f363cfa7985672cbc6e86676e38a69984c4b0c5c"
+        },
+        {
+          "file": "run-11.log",
+          "sha256": "3c939aafdeac6c97399ebf75fc9c8820b91ed200793ab570b053b4a9d8dd5f40"
+        },
+        {
+          "file": "run-12.log",
+          "sha256": "ab4d41804c6464f855e8d3340e4b201a55c612c6a175b26482a16ccc1f60af0d"
+        },
+        {
+          "file": "run-13.log",
+          "sha256": "427be82bef9a00b57b598c790183bb4dd9c040540b9773c71e4ba96ec7aec417"
+        },
+        {
+          "file": "run-14.log",
+          "sha256": "fb55f0e11b8f2bb6cc438196ceb96d19cf71f50101aecc917e846717b539a661"
+        },
+        {
+          "file": "run-15.log",
+          "sha256": "98f590f5270e8edb7d01680bca20755e8d8dafe6adba8886bdc5d5e12e1e9c3a"
+        },
+        {
+          "file": "run-16.log",
+          "sha256": "d9ddaf37a446f90f75b13a3ff718697b93791cb6fc2bd2378d1c430aede5e928"
+        },
+        {
+          "file": "run-17.log",
+          "sha256": "9f10389019b4ea1ebcacf0895e54a8b9e609dad5cad1170d9eb49759fd69af28"
+        },
+        {
+          "file": "run-18.log",
+          "sha256": "90c8573ad442598dc9e7f09518dad162d00fbeaf7534576faec9bed9f70e7149"
+        },
+        {
+          "file": "run-19.log",
+          "sha256": "7edf4b09599236fb5869281d38b2b0102137ec31abbb223f4b01b5e940d2f4c7"
+        },
+        {
+          "file": "run-20.log",
+          "sha256": "781d1c030ff99f9978442a81eb112d3a579b2bb048d1b7385ec6d9befb5b54f2"
+        },
+        {
+          "file": "run-21.log",
+          "sha256": "4c9fdd34d4bba8101b4417bd28e5d54cc181807f1069489b6feb3b1d3c91a346"
+        },
+        {
+          "file": "run-22.log",
+          "sha256": "d355c50133459d1656a7f7dcb255d2decfd2a3c247e3b904a1a6388288ddd59d"
+        },
+        {
+          "file": "run-23.log",
+          "sha256": "b3d3df2cdca5459aaed0256c6a36c48fe897be8c53c3143a2674b5eab9156953"
+        },
+        {
+          "file": "run-24.log",
+          "sha256": "730613b79507df1c0ae626ade7543f7c38f9b613cd69fdcb39e3d8efb5d6cdcf"
+        },
+        {
+          "file": "run-25.log",
+          "sha256": "6e0b36c76c19d4e7e7e12d9fa822f4c25917f37d2286a2d124cbe9ca36477edf"
+        },
+        {
+          "file": "run-26.log",
+          "sha256": "9b26b3c099946fd45735b0518304490489cd5633b12b7fb593841e4206ef4d5b"
+        },
+        {
+          "file": "run-27.log",
+          "sha256": "8fa558125ebbc74fdfc135e785f45bd6001b2d64b7c754573c3dcb1d0b1fc1bb"
+        },
+        {
+          "file": "run-28.log",
+          "sha256": "e8c827eaefeb6bc8a039959216d9f070033caa036c234842dd09887e27e01aa2"
+        },
+        {
+          "file": "run-29.log",
+          "sha256": "21d03defa7ba80d0de7fb34e15bc37afb8e813634501f9fd5677126b559ff1eb"
+        },
+        {
+          "file": "run-30.log",
+          "sha256": "e96f5c2c80b4f0ed863e2a9b5922041a9552d9234e16c9c8fbb8ccd36eec9033"
+        },
+        {
+          "file": "run-31.log",
+          "sha256": "2e63ea4f032d975c602d27e093dc82ecde959e084b4d8c7487cec984626b2eb8"
+        },
+        {
+          "file": "run-32.log",
+          "sha256": "5ea9e82b101610137c9b5b9e4a245b2868a537ee9c81d4843e7b99d6b16e3b8c"
+        },
+        {
+          "file": "run-33.log",
+          "sha256": "b7d0dcd7c284c09d68284c49d816be6354d035d65299cffb7e2c017f3c961c83"
+        },
+        {
+          "file": "run-34.log",
+          "sha256": "dfd955d03653bbbdf27871c7afaca97f41e27b5a9699bdbcd4ac7f5cbad7c77c"
+        },
+        {
+          "file": "run-35.log",
+          "sha256": "eb9c08c56800a425c849734c578044b449c1f19a7200ed6c4f5f544c5b52b1c1"
+        },
+        {
+          "file": "run-36.log",
+          "sha256": "e4057930c46ae97bbad902c5cb7af642213c2133d250679757e896752179c669"
+        },
+        {
+          "file": "run-37.log",
+          "sha256": "bec4b6bbb23929adc054b672c4bd017123b27f1fdd1307bd9f68e30d3c6a432f"
+        },
+        {
+          "file": "run-38.log",
+          "sha256": "6a8381578bd23d9e270cbb00682ee1331f4cb2e4de25601eaf135356ac961347"
+        },
+        {
+          "file": "run-39.log",
+          "sha256": "c6c44e9883d3317dfb5b7ca5884ce158400007de6ba42569e3a742250d6f4943"
+        },
+        {
+          "file": "run-40.log",
+          "sha256": "dd3d95cdb73235ade3d338c8d952c78f8f8891377855ff9fdd6b12bb15a5079c"
+        },
+        {
+          "file": "run-41.log",
+          "sha256": "6f77434dcc22fb12d7c4478adc26cd2e3a1c64188efd52dca917fc187f327d81"
+        },
+        {
+          "file": "run-42.log",
+          "sha256": "8316c46c34ebb7645866cfc18d1081065904df407e12ae29020325dcbf7291bc"
+        },
+        {
+          "file": "run-43.log",
+          "sha256": "c208ebb8ad544c58e4f32f79aaa3dbe27affbfb05fa226c54fa985e67b6aadb9"
+        },
+        {
+          "file": "run-44.log",
+          "sha256": "89b0223bbc2acd3a28b5e1930d1b543b81fe5669b095fb9e366b21832d9396bd"
+        },
+        {
+          "file": "run-45.log",
+          "sha256": "7a09064f3357e20c4d4aa7804417549373e48db98f42d82b986675ec6d3aff09"
+        },
+        {
+          "file": "run-46.log",
+          "sha256": "c279e3a1009145127ccd0314c06e8d268431cacd6539a3ca173edb4579c86355"
+        },
+        {
+          "file": "run-47.log",
+          "sha256": "c9e08068f407690a592d8887ddddfd62317cc476bffb16abfc159fe6758cff3b"
+        },
+        {
+          "file": "run-48.log",
+          "sha256": "9a49d7fce5a4d89dab5ebb7c1dbfd92a8857ff634a2b6248e840c69f2fbba54a"
+        },
+        {
+          "file": "run-49.log",
+          "sha256": "3a51dee1a78e1b237283e860cc4d95f1ec1077c4360b1908c62bc6eb962d8dc5"
+        },
+        {
+          "file": "run-50.log",
+          "sha256": "6ef02d405383d407dfaca27286bb8f2b4b6fbbef0dd95795205cdb6de12c1edf"
+        }
+      ]
+    },
+    {
+      "artifact": "stability-macos-latest-bash5.2-fish4.0.2",
+      "summarySha256": "24bb531d3ba6e332a10595d93dc17f78553687c2d7b174aebf143d085ffc0ba7",
+      "report": {
+        "platform": "darwin",
+        "node": "v24.20.0",
+        "artifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+        "suiteSha256": "3c65b9df70ac676bd0ab651f4a99365ad9a784055809adf27dfef23147aea2b9",
+        "concurrency": 1,
+        "startedAt": "2026-10-08T05:43:07.588Z",
+        "finishedAt": "2026-10-08T06:10:51.302Z",
+        "shells": {
+          "zsh": {
+            "binary": "zsh",
+            "version": "zsh 5.9 (arm64-apple-darwin25.0)"
+          },
+          "fish": {
+            "binary": "/Users/runner/work/_temp/fish/bin/fish",
+            "version": "fish, version 4.0.2"
+          },
+          "bash": {
+            "binary": "/Users/runner/work/_temp/bash/bin/bash",
+            "version": "GNU bash, version 5.2.0(1)-release (aarch64-apple-darwin25.6.0)"
+          }
+        },
+        "repeats": 50,
+        "failures": 0,
+        "failureRate": 0,
+        "runs": [
+          {
+            "run": 1,
+            "passed": true,
+            "ms": 35768
+          },
+          {
+            "run": 2,
+            "passed": true,
+            "ms": 37406
+          },
+          {
+            "run": 3,
+            "passed": true,
+            "ms": 35962
+          },
+          {
+            "run": 4,
+            "passed": true,
+            "ms": 34785
+          },
+          {
+            "run": 5,
+            "passed": true,
+            "ms": 34251
+          },
+          {
+            "run": 6,
+            "passed": true,
+            "ms": 34431
+          },
+          {
+            "run": 7,
+            "passed": true,
+            "ms": 30875
+          },
+          {
+            "run": 8,
+            "passed": true,
+            "ms": 38459
+          },
+          {
+            "run": 9,
+            "passed": true,
+            "ms": 34459
+          },
+          {
+            "run": 10,
+            "passed": true,
+            "ms": 32526
+          },
+          {
+            "run": 11,
+            "passed": true,
+            "ms": 32315
+          },
+          {
+            "run": 12,
+            "passed": true,
+            "ms": 33391
+          },
+          {
+            "run": 13,
+            "passed": true,
+            "ms": 30702
+          },
+          {
+            "run": 14,
+            "passed": true,
+            "ms": 29359
+          },
+          {
+            "run": 15,
+            "passed": true,
+            "ms": 28943
+          },
+          {
+            "run": 16,
+            "passed": true,
+            "ms": 29948
+          },
+          {
+            "run": 17,
+            "passed": true,
+            "ms": 31350
+          },
+          {
+            "run": 18,
+            "passed": true,
+            "ms": 35510
+          },
+          {
+            "run": 19,
+            "passed": true,
+            "ms": 36869
+          },
+          {
+            "run": 20,
+            "passed": true,
+            "ms": 33160
+          },
+          {
+            "run": 21,
+            "passed": true,
+            "ms": 31357
+          },
+          {
+            "run": 22,
+            "passed": true,
+            "ms": 32295
+          },
+          {
+            "run": 23,
+            "passed": true,
+            "ms": 33575
+          },
+          {
+            "run": 24,
+            "passed": true,
+            "ms": 32558
+          },
+          {
+            "run": 25,
+            "passed": true,
+            "ms": 36286
+          },
+          {
+            "run": 26,
+            "passed": true,
+            "ms": 32405
+          },
+          {
+            "run": 27,
+            "passed": true,
+            "ms": 31749
+          },
+          {
+            "run": 28,
+            "passed": true,
+            "ms": 33251
+          },
+          {
+            "run": 29,
+            "passed": true,
+            "ms": 33078
+          },
+          {
+            "run": 30,
+            "passed": true,
+            "ms": 35318
+          },
+          {
+            "run": 31,
+            "passed": true,
+            "ms": 34271
+          },
+          {
+            "run": 32,
+            "passed": true,
+            "ms": 32462
+          },
+          {
+            "run": 33,
+            "passed": true,
+            "ms": 31133
+          },
+          {
+            "run": 34,
+            "passed": true,
+            "ms": 32205
+          },
+          {
+            "run": 35,
+            "passed": true,
+            "ms": 32633
+          },
+          {
+            "run": 36,
+            "passed": true,
+            "ms": 32062
+          },
+          {
+            "run": 37,
+            "passed": true,
+            "ms": 33324
+          },
+          {
+            "run": 38,
+            "passed": true,
+            "ms": 32090
+          },
+          {
+            "run": 39,
+            "passed": true,
+            "ms": 31481
+          },
+          {
+            "run": 40,
+            "passed": true,
+            "ms": 34579
+          },
+          {
+            "run": 41,
+            "passed": true,
+            "ms": 32345
+          },
+          {
+            "run": 42,
+            "passed": true,
+            "ms": 33716
+          },
+          {
+            "run": 43,
+            "passed": true,
+            "ms": 34897
+          },
+          {
+            "run": 44,
+            "passed": true,
+            "ms": 35632
+          },
+          {
+            "run": 45,
+            "passed": true,
+            "ms": 36121
+          },
+          {
+            "run": 46,
+            "passed": true,
+            "ms": 33307
+          },
+          {
+            "run": 47,
+            "passed": true,
+            "ms": 31329
+          },
+          {
+            "run": 48,
+            "passed": true,
+            "ms": 30835
+          },
+          {
+            "run": 49,
+            "passed": true,
+            "ms": 32669
+          },
+          {
+            "run": 50,
+            "passed": true,
+            "ms": 33150
+          }
+        ]
+      },
+      "assertions": 3650,
+      "logs": [
+        {
+          "file": "run-1.log",
+          "sha256": "89e1dccf8acba59a61ba9f47e305041e186e07026e26580ff635864003543e00"
+        },
+        {
+          "file": "run-2.log",
+          "sha256": "80cbe89b76ae6f7b89b6f787f5db24765a41f726d9cc00033bd71f53edccbcb3"
+        },
+        {
+          "file": "run-3.log",
+          "sha256": "d31256b86524097499d58fbb93557e1f8598d6bba1cce68952ce0bc5d1770882"
+        },
+        {
+          "file": "run-4.log",
+          "sha256": "16ed56e9924fa9eb8b7b32201cfa68559a5390ad932ebf4477e73fc130a69e33"
+        },
+        {
+          "file": "run-5.log",
+          "sha256": "746f6d190982870938999f2e6f96fb91db25364d3854533b9e201fbe6544163f"
+        },
+        {
+          "file": "run-6.log",
+          "sha256": "7131da1f8adabea7adbb54a4f7d671b67de2bcd67e98a16a1190cad69827a4e5"
+        },
+        {
+          "file": "run-7.log",
+          "sha256": "b4bffec02a0937f4d240101fbee8336c09a038eaf80dab8a727ea7248092ff00"
+        },
+        {
+          "file": "run-8.log",
+          "sha256": "7182028f45eb0124134abb9c195a3aea29606e491a8a6855c8a15a0b7292d88a"
+        },
+        {
+          "file": "run-9.log",
+          "sha256": "7844a5f9c3934c2387af7e47e5baef589ee92215ecacc14da79ac5952f69e8d5"
+        },
+        {
+          "file": "run-10.log",
+          "sha256": "41de95cf8a30a95345c2f6add42b308fd6d2ad896bf158bcec4290373cb4829d"
+        },
+        {
+          "file": "run-11.log",
+          "sha256": "c885064a68f69ded90473c14df104ab5ecefa50b55a9c153acbc81690ca5423f"
+        },
+        {
+          "file": "run-12.log",
+          "sha256": "ead3485a67dca018fd320be3515be29b568e44e1ab28c3dcc99e08c312317990"
+        },
+        {
+          "file": "run-13.log",
+          "sha256": "7db5a24cc422fac35096897ddea83e6720df06edbdc76e67f511b79d9f86923a"
+        },
+        {
+          "file": "run-14.log",
+          "sha256": "576461959b84f98ce09e4757c3a11313a93788d249e0b8db074b42ba79202b3d"
+        },
+        {
+          "file": "run-15.log",
+          "sha256": "3f2ff92f264b574f41a172b02b2a7da3b77e4414c5c5f1846498c951685dcedc"
+        },
+        {
+          "file": "run-16.log",
+          "sha256": "9bea451260597e03c521ed336690bd9633f3233dfe10292c40d4228f0787ef27"
+        },
+        {
+          "file": "run-17.log",
+          "sha256": "67b7c39774c1dedf14108a0fbee2c5c89041d7390b841fc0d4d878975254ebfe"
+        },
+        {
+          "file": "run-18.log",
+          "sha256": "28754458770e6af79eeb51fa4a874a6c1db3d53684e8899e6fcb0e0984822ac3"
+        },
+        {
+          "file": "run-19.log",
+          "sha256": "8ac789731ae519e367ba3b028e1043e76001e7eabe62b40557c69f1574dcba1d"
+        },
+        {
+          "file": "run-20.log",
+          "sha256": "aad7596571a6921a6f7e959c9b2952f032e59a801b12eb56fca6701dd75b5f8a"
+        },
+        {
+          "file": "run-21.log",
+          "sha256": "d01edb13b85a064681091e06f2853e8127c441f4c0741088e84afe000779fa33"
+        },
+        {
+          "file": "run-22.log",
+          "sha256": "049837b5075114011a49d07cea37ad76ef498022a52e001a7915c64421b348f0"
+        },
+        {
+          "file": "run-23.log",
+          "sha256": "2d5180a90eb860912fb68f5a624e22e848373a623a2e36d660471b527ef49c32"
+        },
+        {
+          "file": "run-24.log",
+          "sha256": "30f40d75d8f7b839a7fcdc6f7d0607955531a4c0a87fc6bf61f7916c52653a38"
+        },
+        {
+          "file": "run-25.log",
+          "sha256": "8fb8bb384b25c65a12315a40336334f27e233532f1d4c8121913eec92e655ed6"
+        },
+        {
+          "file": "run-26.log",
+          "sha256": "87f1d78a73b9f6aab58775b82aed294c7a3697c8afdaf6ca371040d6f1727d51"
+        },
+        {
+          "file": "run-27.log",
+          "sha256": "4e44e9700fead461982099b37fbe1612ca26212f5819a1474a4c98ace30e009a"
+        },
+        {
+          "file": "run-28.log",
+          "sha256": "ecad3c52705209b10a0ef6bfd5f8d8b5cf4919c39e1f52c19e68cdabac3ca78e"
+        },
+        {
+          "file": "run-29.log",
+          "sha256": "ab7fa13d16b1749dd71091a437e6c124f3c6f456b963c31f96d3124652b2bdb1"
+        },
+        {
+          "file": "run-30.log",
+          "sha256": "a4a1e6b7ddc173986dcbcf958fcb591b634faab816dd5cc5a1de08ddba87995b"
+        },
+        {
+          "file": "run-31.log",
+          "sha256": "e9218722ca9406fcfc86d53b3944e348fc5790c6eacef60c9108add2f728b58b"
+        },
+        {
+          "file": "run-32.log",
+          "sha256": "474f0450fb979c26d8db9b19589beb3ec975807711d18f28c0b813b6279cb6e8"
+        },
+        {
+          "file": "run-33.log",
+          "sha256": "58ae61f91c448fbbcd8cce2e01f9b9f15498cb439797b610b6a2e1c55756ab2b"
+        },
+        {
+          "file": "run-34.log",
+          "sha256": "41ece857e1f2768bf1357709c604c9f9d26d93576431974c63117d2ab9cdc04f"
+        },
+        {
+          "file": "run-35.log",
+          "sha256": "4051b91a5709b4fa2e042f08f86a6cd2270358ee88f6cbc2b06842429bf4a047"
+        },
+        {
+          "file": "run-36.log",
+          "sha256": "284dd3af0bc71ff1c1f83101bed92f3f768fb194f78dd7a2fc9bbe010cd927e8"
+        },
+        {
+          "file": "run-37.log",
+          "sha256": "c82bf0e7c0c94bd917ce0af19e1565d7655ff56f414ad658566ed441e20db17f"
+        },
+        {
+          "file": "run-38.log",
+          "sha256": "b4a1716f1202ac237c3ad62fa4d5fc61e060876bd424292ef941d5d8818b5b2a"
+        },
+        {
+          "file": "run-39.log",
+          "sha256": "ec65e00c0a4d7da7461fbee6fb31220346f9f4abb7273e0c015bd4a8b293c10c"
+        },
+        {
+          "file": "run-40.log",
+          "sha256": "87a326c53a57e308d6765ac8afea0781a3b0b41c97aba6e083a6760318501c95"
+        },
+        {
+          "file": "run-41.log",
+          "sha256": "058813e3cbcd12c9a6566a25844904f322984d51ca457139f301d951083fb169"
+        },
+        {
+          "file": "run-42.log",
+          "sha256": "be8986a25726a9700f7d832ed9b6d2113d7d73e5289cf0c49b0592ef5294524d"
+        },
+        {
+          "file": "run-43.log",
+          "sha256": "0bf06690d9156dccf9a8f1ffac468a0f7bab7ea24fb188dc4f73996d6c45a87b"
+        },
+        {
+          "file": "run-44.log",
+          "sha256": "b4777d123aa1395accf75053aa78806edc25230888073da256332a9c4640d20d"
+        },
+        {
+          "file": "run-45.log",
+          "sha256": "72cce95bf8edb6cf4efa69fcdc4aafef50f84249a5e545564b43646e2872d8d8"
+        },
+        {
+          "file": "run-46.log",
+          "sha256": "ffe27531e8308fdcbe87c1d3172c948d022a01e74e015b16a67aa5089fadd97d"
+        },
+        {
+          "file": "run-47.log",
+          "sha256": "4c6c3f9136f6c2cf46c7a85018c6045d50655a18909d3a1612006fd14639bc03"
+        },
+        {
+          "file": "run-48.log",
+          "sha256": "d7e8e1905fb85df9e3b1802d8139ae6ff7e653973600075e3bda526d44b9c754"
+        },
+        {
+          "file": "run-49.log",
+          "sha256": "dfbab8e98117273af1cf9a832cd5b00b85f937999bcfeddfea1d545666414c27"
+        },
+        {
+          "file": "run-50.log",
+          "sha256": "a64d442f02a60b5ca890f170653d2e769cc04434f742a25b36ef56d402a66e63"
+        }
+      ]
+    },
+    {
+      "artifact": "stability-ubuntu-latest-bash4.4-fish3.6.4",
+      "summarySha256": "feb74eac08e86900ec636a6aea7f613baec4f27aaee730f41c38b293716d71e6",
+      "report": {
+        "platform": "linux",
+        "node": "v24.21.0",
+        "artifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+        "suiteSha256": "3c65b9df70ac676bd0ab651f4a99365ad9a784055809adf27dfef23147aea2b9",
+        "concurrency": 1,
+        "startedAt": "2026-10-08T05:38:09.901Z",
+        "finishedAt": "2026-10-08T06:15:40.282Z",
+        "shells": {
+          "zsh": {
+            "binary": "zsh",
+            "version": "zsh 5.9 (x86_64-ubuntu-linux-gnu)"
+          },
+          "fish": {
+            "binary": "/home/runner/work/_temp/fish/bin/fish",
+            "version": "fish, version 3.6.4"
+          },
+          "bash": {
+            "binary": "/home/runner/work/_temp/bash/bin/bash",
+            "version": "GNU bash, version 4.4.0(1)-release (x86_64-unknown-linux-gnu)"
+          }
+        },
+        "repeats": 50,
+        "failures": 0,
+        "failureRate": 0,
+        "runs": [
+          {
+            "run": 1,
+            "passed": true,
+            "ms": 45087
+          },
+          {
+            "run": 2,
+            "passed": true,
+            "ms": 45054
+          },
+          {
+            "run": 3,
+            "passed": true,
+            "ms": 45026
+          },
+          {
+            "run": 4,
+            "passed": true,
+            "ms": 45010
+          },
+          {
+            "run": 5,
+            "passed": true,
+            "ms": 44960
+          },
+          {
+            "run": 6,
+            "passed": true,
+            "ms": 44956
+          },
+          {
+            "run": 7,
+            "passed": true,
+            "ms": 45018
+          },
+          {
+            "run": 8,
+            "passed": true,
+            "ms": 44973
+          },
+          {
+            "run": 9,
+            "passed": true,
+            "ms": 45145
+          },
+          {
+            "run": 10,
+            "passed": true,
+            "ms": 44945
+          },
+          {
+            "run": 11,
+            "passed": true,
+            "ms": 44968
+          },
+          {
+            "run": 12,
+            "passed": true,
+            "ms": 44965
+          },
+          {
+            "run": 13,
+            "passed": true,
+            "ms": 45031
+          },
+          {
+            "run": 14,
+            "passed": true,
+            "ms": 44979
+          },
+          {
+            "run": 15,
+            "passed": true,
+            "ms": 45215
+          },
+          {
+            "run": 16,
+            "passed": true,
+            "ms": 44900
+          },
+          {
+            "run": 17,
+            "passed": true,
+            "ms": 44890
+          },
+          {
+            "run": 18,
+            "passed": true,
+            "ms": 45111
+          },
+          {
+            "run": 19,
+            "passed": true,
+            "ms": 44929
+          },
+          {
+            "run": 20,
+            "passed": true,
+            "ms": 44951
+          },
+          {
+            "run": 21,
+            "passed": true,
+            "ms": 45058
+          },
+          {
+            "run": 22,
+            "passed": true,
+            "ms": 45009
+          },
+          {
+            "run": 23,
+            "passed": true,
+            "ms": 45084
+          },
+          {
+            "run": 24,
+            "passed": true,
+            "ms": 44839
+          },
+          {
+            "run": 25,
+            "passed": true,
+            "ms": 44995
+          },
+          {
+            "run": 26,
+            "passed": true,
+            "ms": 44950
+          },
+          {
+            "run": 27,
+            "passed": true,
+            "ms": 45129
+          },
+          {
+            "run": 28,
+            "passed": true,
+            "ms": 44902
+          },
+          {
+            "run": 29,
+            "passed": true,
+            "ms": 45056
+          },
+          {
+            "run": 30,
+            "passed": true,
+            "ms": 45040
+          },
+          {
+            "run": 31,
+            "passed": true,
+            "ms": 44895
+          },
+          {
+            "run": 32,
+            "passed": true,
+            "ms": 44980
+          },
+          {
+            "run": 33,
+            "passed": true,
+            "ms": 45109
+          },
+          {
+            "run": 34,
+            "passed": true,
+            "ms": 44857
+          },
+          {
+            "run": 35,
+            "passed": true,
+            "ms": 45129
+          },
+          {
+            "run": 36,
+            "passed": true,
+            "ms": 45079
+          },
+          {
+            "run": 37,
+            "passed": true,
+            "ms": 44903
+          },
+          {
+            "run": 38,
+            "passed": true,
+            "ms": 44975
+          },
+          {
+            "run": 39,
+            "passed": true,
+            "ms": 44935
+          },
+          {
+            "run": 40,
+            "passed": true,
+            "ms": 44964
+          },
+          {
+            "run": 41,
+            "passed": true,
+            "ms": 45072
+          },
+          {
+            "run": 42,
+            "passed": true,
+            "ms": 44943
+          },
+          {
+            "run": 43,
+            "passed": true,
+            "ms": 44998
+          },
+          {
+            "run": 44,
+            "passed": true,
+            "ms": 44998
+          },
+          {
+            "run": 45,
+            "passed": true,
+            "ms": 44953
+          },
+          {
+            "run": 46,
+            "passed": true,
+            "ms": 45108
+          },
+          {
+            "run": 47,
+            "passed": true,
+            "ms": 45016
+          },
+          {
+            "run": 48,
+            "passed": true,
+            "ms": 44910
+          },
+          {
+            "run": 49,
+            "passed": true,
+            "ms": 45040
+          },
+          {
+            "run": 50,
+            "passed": true,
+            "ms": 45123
+          }
+        ]
+      },
+      "assertions": 3600,
+      "logs": [
+        {
+          "file": "run-1.log",
+          "sha256": "425cd5fe52ce448819b95490006a6cd256ae823d49d9bd9e8b2ce595881b25b5"
+        },
+        {
+          "file": "run-2.log",
+          "sha256": "5212e39f14eb90682961d372cfe5b3a111d66b1e99175cc8b8738a5cfe95f4d4"
+        },
+        {
+          "file": "run-3.log",
+          "sha256": "df40776531280eabc9d7e2965688139dc0ba503273b53ef909b462eb431819f2"
+        },
+        {
+          "file": "run-4.log",
+          "sha256": "aff19cb1204a1efde013e224040116a204f7385f791c937b5f4f84c467dc48d4"
+        },
+        {
+          "file": "run-5.log",
+          "sha256": "ae7555d4916c535c20e291cc3fbe2de5bf424430a7752bfec1deea0846e9ffcd"
+        },
+        {
+          "file": "run-6.log",
+          "sha256": "766419ea1a00af81e765391d72eb9b2ce7ac3439fe7c42dcdf70c6d805246b73"
+        },
+        {
+          "file": "run-7.log",
+          "sha256": "17f77dba7d9123b51d631c43787bd9392f4e63e91680c2724e96b57ec75f38f5"
+        },
+        {
+          "file": "run-8.log",
+          "sha256": "e380cfbabd5824c865250ca0136b026803910c17705eb5abc28c24eea81aa07f"
+        },
+        {
+          "file": "run-9.log",
+          "sha256": "25d6841f46c37ebe661942b2aa3ae30357641320c211f4eaefd2b8e1b0bb7a9e"
+        },
+        {
+          "file": "run-10.log",
+          "sha256": "df6c5ce7fe3479743fccc577d3814294fcecd6052b8ed2da16f8f254251b640f"
+        },
+        {
+          "file": "run-11.log",
+          "sha256": "c636384dcc890e2ad7621c3d6a6b2add455635acbd4825b0036826af351ae965"
+        },
+        {
+          "file": "run-12.log",
+          "sha256": "d25dd4f051fd5388e69de25140065308d6b5aebf4e64c964096e0f0ae94741b8"
+        },
+        {
+          "file": "run-13.log",
+          "sha256": "004d751c6da06c8db6bb5b271b82ec14cfc1730a5bafa7b232409846a5dcb0ff"
+        },
+        {
+          "file": "run-14.log",
+          "sha256": "2283e83d07fc8204ea09490242c8672aa443f11cebd1b56b1423c65e7dea0206"
+        },
+        {
+          "file": "run-15.log",
+          "sha256": "3b46b04e7cff3de2a09beda3e43b5cf86c567affe5b85e681315686a9ae7043c"
+        },
+        {
+          "file": "run-16.log",
+          "sha256": "01592fc16f0223e528f76ca8161b17ccba95c035878a3b04505cfc6ae65fdeb3"
+        },
+        {
+          "file": "run-17.log",
+          "sha256": "7affe338a30eae3019d03d4cc9926637dcb43fca4653465b0b9db5c61a188ce2"
+        },
+        {
+          "file": "run-18.log",
+          "sha256": "af253a634561cbeaa40d31aa03d7791073c6fba46c2d5629636240330f064b67"
+        },
+        {
+          "file": "run-19.log",
+          "sha256": "c966bb8cb27359ed2b7eb3e5f8e6a65217aafdac2f0807c8a86268477be53cce"
+        },
+        {
+          "file": "run-20.log",
+          "sha256": "e72dfd8e8763d0a47c10e355e2d8df67c849a29b461cd3be6d4b5d4273987aee"
+        },
+        {
+          "file": "run-21.log",
+          "sha256": "95148c637e2584cb3452fdf15004845d9cbff44b40d8236983fc3a962700e847"
+        },
+        {
+          "file": "run-22.log",
+          "sha256": "4035bc7ea2dd8e05274f56edf0df9a478a3644ad6df6740c162f0ca4928be168"
+        },
+        {
+          "file": "run-23.log",
+          "sha256": "2bc061e116f3ce6bc3082796c1f8ccfe6a4569e12e46f44b59da27b1a1268898"
+        },
+        {
+          "file": "run-24.log",
+          "sha256": "bda4e5df9ed1d13014ae11a04f1d3c58dfd4715b0bc4a07ec61a221b78ae2505"
+        },
+        {
+          "file": "run-25.log",
+          "sha256": "049c8d8fdb4dfac889682ac96b7bbb6d5e7cfe200460feae082f2df25e10e7f6"
+        },
+        {
+          "file": "run-26.log",
+          "sha256": "02a91dca770cb7f231b545c7e85793f7fe40c1f4902a4f49b30eed12b91582e9"
+        },
+        {
+          "file": "run-27.log",
+          "sha256": "84487d3c095150c87e2a5abc5d726f5af4a60ead7d4636028fc66cd92668782c"
+        },
+        {
+          "file": "run-28.log",
+          "sha256": "67d7e9187e7d1a1c65beb0301a49b517002dde8538fbd91f2c76671e4e7633dd"
+        },
+        {
+          "file": "run-29.log",
+          "sha256": "ad3426c032c353d14b0ccd562764af0ca3127add8bfab836a9809280945497f0"
+        },
+        {
+          "file": "run-30.log",
+          "sha256": "23a5ee90c07f9597fd2a00c474c029ac4730f5d8b5743378c4c7f8a2c13c2259"
+        },
+        {
+          "file": "run-31.log",
+          "sha256": "fddef8dc0a55bbb650b0a00a25311e3631cb5eb5ecb5326c1c3ab5387988f70f"
+        },
+        {
+          "file": "run-32.log",
+          "sha256": "957705e065d0f64ea0c74a2ff1028e81f0d1c48700489be8ecb25dba0c4d9730"
+        },
+        {
+          "file": "run-33.log",
+          "sha256": "5eb9ff40a68f604f8f96e4164832726425c529d0a0044fd2bcc348a63a00b4c8"
+        },
+        {
+          "file": "run-34.log",
+          "sha256": "7cb64509a9a275a07a8a11e8f03f9704088f5c82b4e2cf11b46cf445da22dbef"
+        },
+        {
+          "file": "run-35.log",
+          "sha256": "be1c62d4ad558e1d23ca748e4309e6045423282a656716e071212e614573dbfe"
+        },
+        {
+          "file": "run-36.log",
+          "sha256": "ae183fcb661425049cb49d9ae89ee1f652a0f6c69d774afdbdbdd19470964eb5"
+        },
+        {
+          "file": "run-37.log",
+          "sha256": "a803456e6e541c8cb091e67ec8889c202d6279cdee6c16a544a1cf58ea8bdd5b"
+        },
+        {
+          "file": "run-38.log",
+          "sha256": "3a8260f4a4dd7bf3286227e2bdc742f804b02b8fe86cb95f6e3eb773c1bb4efd"
+        },
+        {
+          "file": "run-39.log",
+          "sha256": "5f8e34bcc0dc2d292f831bcf17bf8bd4fcb09d929112f1456cbd7805f9c95815"
+        },
+        {
+          "file": "run-40.log",
+          "sha256": "60da2e731d47ee338b43899b0093b7de46e503231701f5e14cf861261a9188b7"
+        },
+        {
+          "file": "run-41.log",
+          "sha256": "bce76aaaf5013408d8839591f63e9f4ca0b492870a6494abb69f03a9ff46a068"
+        },
+        {
+          "file": "run-42.log",
+          "sha256": "5958425f318839ea11870bc79e242b85cd1d6da1f0fa8f74e80c80b560c02144"
+        },
+        {
+          "file": "run-43.log",
+          "sha256": "5507aebb9ff5d5e9f6164f17837f97484e2a5baaf434c389daf8528f5ef06512"
+        },
+        {
+          "file": "run-44.log",
+          "sha256": "a68d6f0e578babcaf7fee437a89767be7cd11d0f9e20ab3e4f3105d2ec377e60"
+        },
+        {
+          "file": "run-45.log",
+          "sha256": "2d0588121986b5b146d567dd0c239b9d2327ce67f2247b5bc97a437965871dd4"
+        },
+        {
+          "file": "run-46.log",
+          "sha256": "ab8da6aefdf75ddcacf4b6b41baffe365ea299e05fa369ee105765bfccdd83f9"
+        },
+        {
+          "file": "run-47.log",
+          "sha256": "1b5aabf56f75c7372a5ae7df78e673b5cb670972cac574b243e2e9c8f579576d"
+        },
+        {
+          "file": "run-48.log",
+          "sha256": "7cf079dfea604a98cff08efa4cf4de7b12da4f3c330cb964f388611c01954d7c"
+        },
+        {
+          "file": "run-49.log",
+          "sha256": "b991a132b975961c549e37cc5baa2e7d385a2fd92321c10a8109818be4a73db7"
+        },
+        {
+          "file": "run-50.log",
+          "sha256": "d4ab12c7d6d659bf4ce4de4bafe3d09d44cb14cdbbcba916e9ef81c813248e19"
+        }
+      ]
+    },
+    {
+      "artifact": "stability-ubuntu-latest-bash5.2-fish4.0.2",
+      "summarySha256": "8129b26c045b57a711280acfbf6767769932fd2ab2116c1571403205b02287d5",
+      "report": {
+        "platform": "linux",
+        "node": "v24.21.0",
+        "artifactSha256": "48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326",
+        "suiteSha256": "3c65b9df70ac676bd0ab651f4a99365ad9a784055809adf27dfef23147aea2b9",
+        "concurrency": 1,
+        "startedAt": "2026-10-08T05:37:52.127Z",
+        "finishedAt": "2026-10-08T05:59:25.556Z",
+        "shells": {
+          "zsh": {
+            "binary": "zsh",
+            "version": "zsh 5.9 (x86_64-ubuntu-linux-gnu)"
+          },
+          "fish": {
+            "binary": "/home/runner/work/_temp/fish/bin/fish",
+            "version": "fish, version 4.0.2"
+          },
+          "bash": {
+            "binary": "/home/runner/work/_temp/bash/bin/bash",
+            "version": "GNU bash, version 5.2.0(1)-release (x86_64-pc-linux-gnu)"
+          }
+        },
+        "repeats": 50,
+        "failures": 0,
+        "failureRate": 0,
+        "runs": [
+          {
+            "run": 1,
+            "passed": true,
+            "ms": 25976
+          },
+          {
+            "run": 2,
+            "passed": true,
+            "ms": 25865
+          },
+          {
+            "run": 3,
+            "passed": true,
+            "ms": 25863
+          },
+          {
+            "run": 4,
+            "passed": true,
+            "ms": 25883
+          },
+          {
+            "run": 5,
+            "passed": true,
+            "ms": 25794
+          },
+          {
+            "run": 6,
+            "passed": true,
+            "ms": 25812
+          },
+          {
+            "run": 7,
+            "passed": true,
+            "ms": 25975
+          },
+          {
+            "run": 8,
+            "passed": true,
+            "ms": 25908
+          },
+          {
+            "run": 9,
+            "passed": true,
+            "ms": 25794
+          },
+          {
+            "run": 10,
+            "passed": true,
+            "ms": 25867
+          },
+          {
+            "run": 11,
+            "passed": true,
+            "ms": 25843
+          },
+          {
+            "run": 12,
+            "passed": true,
+            "ms": 25860
+          },
+          {
+            "run": 13,
+            "passed": true,
+            "ms": 25815
+          },
+          {
+            "run": 14,
+            "passed": true,
+            "ms": 25869
+          },
+          {
+            "run": 15,
+            "passed": true,
+            "ms": 25862
+          },
+          {
+            "run": 16,
+            "passed": true,
+            "ms": 25876
+          },
+          {
+            "run": 17,
+            "passed": true,
+            "ms": 25862
+          },
+          {
+            "run": 18,
+            "passed": true,
+            "ms": 25972
+          },
+          {
+            "run": 19,
+            "passed": true,
+            "ms": 25885
+          },
+          {
+            "run": 20,
+            "passed": true,
+            "ms": 25872
+          },
+          {
+            "run": 21,
+            "passed": true,
+            "ms": 25776
+          },
+          {
+            "run": 22,
+            "passed": true,
+            "ms": 25872
+          },
+          {
+            "run": 23,
+            "passed": true,
+            "ms": 25862
+          },
+          {
+            "run": 24,
+            "passed": true,
+            "ms": 25818
+          },
+          {
+            "run": 25,
+            "passed": true,
+            "ms": 25819
+          },
+          {
+            "run": 26,
+            "passed": true,
+            "ms": 25836
+          },
+          {
+            "run": 27,
+            "passed": true,
+            "ms": 25838
+          },
+          {
+            "run": 28,
+            "passed": true,
+            "ms": 25780
+          },
+          {
+            "run": 29,
+            "passed": true,
+            "ms": 25859
+          },
+          {
+            "run": 30,
+            "passed": true,
+            "ms": 25933
+          },
+          {
+            "run": 31,
+            "passed": true,
+            "ms": 25853
+          },
+          {
+            "run": 32,
+            "passed": true,
+            "ms": 25912
+          },
+          {
+            "run": 33,
+            "passed": true,
+            "ms": 25835
+          },
+          {
+            "run": 34,
+            "passed": true,
+            "ms": 25830
+          },
+          {
+            "run": 35,
+            "passed": true,
+            "ms": 25875
+          },
+          {
+            "run": 36,
+            "passed": true,
+            "ms": 25918
+          },
+          {
+            "run": 37,
+            "passed": true,
+            "ms": 25881
+          },
+          {
+            "run": 38,
+            "passed": true,
+            "ms": 25876
+          },
+          {
+            "run": 39,
+            "passed": true,
+            "ms": 25850
+          },
+          {
+            "run": 40,
+            "passed": true,
+            "ms": 25862
+          },
+          {
+            "run": 41,
+            "passed": true,
+            "ms": 25839
+          },
+          {
+            "run": 42,
+            "passed": true,
+            "ms": 25818
+          },
+          {
+            "run": 43,
+            "passed": true,
+            "ms": 25911
+          },
+          {
+            "run": 44,
+            "passed": true,
+            "ms": 25826
+          },
+          {
+            "run": 45,
+            "passed": true,
+            "ms": 25948
+          },
+          {
+            "run": 46,
+            "passed": true,
+            "ms": 25854
+          },
+          {
+            "run": 47,
+            "passed": true,
+            "ms": 25912
+          },
+          {
+            "run": 48,
+            "passed": true,
+            "ms": 25879
+          },
+          {
+            "run": 49,
+            "passed": true,
+            "ms": 25802
+          },
+          {
+            "run": 50,
+            "passed": true,
+            "ms": 25870
+          }
+        ]
+      },
+      "assertions": 3600,
+      "logs": [
+        {
+          "file": "run-1.log",
+          "sha256": "1f565649548f073fe4cd118d84da0f5775f9adb26ef50ad574b2ab05a9c772d8"
+        },
+        {
+          "file": "run-2.log",
+          "sha256": "4252025d28790f6250651e0f65ec1d33d31ecb171e030f3ae2e930d2c8a35e09"
+        },
+        {
+          "file": "run-3.log",
+          "sha256": "9755caec36f99414d38f6f7d06eef733a458f0bd36c3a34f8272552e5809e6cb"
+        },
+        {
+          "file": "run-4.log",
+          "sha256": "f0a16587b99b9b765427c234664aa3df34b1ae5da05b3d0c77791cea75e842fd"
+        },
+        {
+          "file": "run-5.log",
+          "sha256": "47ca44f4fe090cc54aba09b30a150ae7119fa27f2271997d78bfb9721d84c74a"
+        },
+        {
+          "file": "run-6.log",
+          "sha256": "b3e81760bd636aac1d6d76299e7e070c870c4642757ad9d8f4e2017079458821"
+        },
+        {
+          "file": "run-7.log",
+          "sha256": "ad56a1627c369881b6f8b5a07762b0a3cafa305abea50ae2cd6689e6eb8d4a7f"
+        },
+        {
+          "file": "run-8.log",
+          "sha256": "9d25db8b8b34842ca30ae8ca885d576b0dca96293081730957553c31ba6c7ca0"
+        },
+        {
+          "file": "run-9.log",
+          "sha256": "31ae719171db4027ded2dfb4ec8e97b1f10f74369dad65c30628a8bb495567a5"
+        },
+        {
+          "file": "run-10.log",
+          "sha256": "0c24089b06b1dd4adf277bc95acac26d138006de79b9ec1668b917a2f1d1e4a1"
+        },
+        {
+          "file": "run-11.log",
+          "sha256": "0e6debf7b81d8e5a0cc72be580496fcb982976067d8c727b81304e485604bf39"
+        },
+        {
+          "file": "run-12.log",
+          "sha256": "9d3f3cc77503cc91dd7b0195ad459e947b1b8d965ea4163786ce1a1c9ff792b2"
+        },
+        {
+          "file": "run-13.log",
+          "sha256": "655587d5b53942c3b8eca72266050f3875ae6a9269086e0a2ab1b58dd3cf5a1a"
+        },
+        {
+          "file": "run-14.log",
+          "sha256": "58b425a8ed959738f6422dfcb8d3dfb721560199b99f86f3273ee91e5a7175bf"
+        },
+        {
+          "file": "run-15.log",
+          "sha256": "d690ba03722596f50b44ac309a67962936e65a209844253de469bc49ecc5f22e"
+        },
+        {
+          "file": "run-16.log",
+          "sha256": "76550f1caf5260013fc3573ddbfb9e811bb89437bc8eb27214a0718e21c0f088"
+        },
+        {
+          "file": "run-17.log",
+          "sha256": "cbee4c52525a9a33e5a6a6a4b4cfd22bd9fd51bdd086e4410c2bb2ed5eab3e28"
+        },
+        {
+          "file": "run-18.log",
+          "sha256": "7ceedc813ce9cb0c132689ae83cf6d2056d292f1e023d1aad6e9158bb362161f"
+        },
+        {
+          "file": "run-19.log",
+          "sha256": "7eefb1b2c219c7f78cb676be5f2952adecb681fa1730e707cb9faaab3f2b1121"
+        },
+        {
+          "file": "run-20.log",
+          "sha256": "fb24d23904a74311bad1cf9e447ed29789e929fcd9b763a59dd199bd3d18c5b8"
+        },
+        {
+          "file": "run-21.log",
+          "sha256": "e88ce047943ea97910bd382fe487545e6573da9fdc652f294086819f15565ab4"
+        },
+        {
+          "file": "run-22.log",
+          "sha256": "07cc4329f11cada3bb1546599d6d46223607660e9a83cf29b5ff88e235407b45"
+        },
+        {
+          "file": "run-23.log",
+          "sha256": "5dc11489c5a141e3ee3f2f80d0b7824a03c00adf29b5db2b580ebeff2503066d"
+        },
+        {
+          "file": "run-24.log",
+          "sha256": "aed9d29f909b7c99910b10f95e8e34b65ecc9ee6ad29d3561d180f2ee6a044be"
+        },
+        {
+          "file": "run-25.log",
+          "sha256": "3009088a85a99e99284a9e3e3dec597568a2b121b503e94143daa5524eb0c757"
+        },
+        {
+          "file": "run-26.log",
+          "sha256": "860bd0799b8115a6b819d3d28e3ff1579912e8b00bcc30e60cbe5a60c3906982"
+        },
+        {
+          "file": "run-27.log",
+          "sha256": "1a948824adc6314579cbaaeaa03e155d547f45ae1a3274715d68e9f7ef447ee9"
+        },
+        {
+          "file": "run-28.log",
+          "sha256": "7a25bc8eb0fbb5550a9d0d83c045938f4a8c4410286b97d63606e73aa81fc4ff"
+        },
+        {
+          "file": "run-29.log",
+          "sha256": "248a149164f3ce78e451cdedb676329104be8e71dd493227dc07784a684eaec4"
+        },
+        {
+          "file": "run-30.log",
+          "sha256": "9a44649fbb9cf89e235c5377000b8c0004912076111c1c8addecfbc8c2b80d98"
+        },
+        {
+          "file": "run-31.log",
+          "sha256": "129f6514150b047d309f4f749100fa0556cc5c9f3d40b6d7643d9b33a31622ec"
+        },
+        {
+          "file": "run-32.log",
+          "sha256": "47e8beded0bfb746ca43b8cf8c636e81639bc975441927078d749147aa48ec4d"
+        },
+        {
+          "file": "run-33.log",
+          "sha256": "f34bb3d1e51a89f303aecb571e52555ba4af8e0c1544ed7fdf851398b487ec93"
+        },
+        {
+          "file": "run-34.log",
+          "sha256": "fbed62e55e706c1c4e5ae113ad0b2131ee3b459514b56fed9da550e33820287e"
+        },
+        {
+          "file": "run-35.log",
+          "sha256": "458dbb886ca60aaffd15aceeadbbeb54aa5fe75f5e6047f50fb0cdf8cdc2bade"
+        },
+        {
+          "file": "run-36.log",
+          "sha256": "f310a5be995ec972d43fa241aca4694412fac37087cde6b24db1df33f7f6b2b0"
+        },
+        {
+          "file": "run-37.log",
+          "sha256": "b120c72679f5a4520734c82bca0f93754aea9afff6d20b7e9088450a41d86ec3"
+        },
+        {
+          "file": "run-38.log",
+          "sha256": "bc4f60fef19004a165e44931f35b4103f9b2fb903c8f53fe697cfa2821660f77"
+        },
+        {
+          "file": "run-39.log",
+          "sha256": "f9ac6a7de48909f7616f3bdffc78015c3a367afb49f2fff2cd5585ef671682ca"
+        },
+        {
+          "file": "run-40.log",
+          "sha256": "15a162388f973d2b20881d2a93e8dfffc24f59a1502da8519b2b910dce926537"
+        },
+        {
+          "file": "run-41.log",
+          "sha256": "10c8e6b1483dfc6ccbc0cdcf71db655d7cdb60e7258f69855074d59f44ab73d8"
+        },
+        {
+          "file": "run-42.log",
+          "sha256": "174b6bb1827e810779ebd8e18fb7702a8b0a528f2081b2e4fe216fa77b006062"
+        },
+        {
+          "file": "run-43.log",
+          "sha256": "20bf4e0d10c3155ce8b0be5a7f3edcf5ecc1b6b69136a7d01ef877f09369d21f"
+        },
+        {
+          "file": "run-44.log",
+          "sha256": "2807a9e934421593729864028f1e93e329516b3f9b5f442d1092343d93ffdb37"
+        },
+        {
+          "file": "run-45.log",
+          "sha256": "966ac4a0dde61e9131b5fd426c00461437dda21306a8058d08b468aa99236f9a"
+        },
+        {
+          "file": "run-46.log",
+          "sha256": "40d1688be495e39c568134ad98fb9ad2177ddc5a19e35cea354b403dd68f08d9"
+        },
+        {
+          "file": "run-47.log",
+          "sha256": "3ddfb3fc61251c0718b1aab5dcc8d920a52e39d5c16c587b98fb19b0b66861cc"
+        },
+        {
+          "file": "run-48.log",
+          "sha256": "082050d1e5bed4a504708fa3642f49c910728285cd637f5ac376173df822fb1c"
+        },
+        {
+          "file": "run-49.log",
+          "sha256": "6b8988797242cea053881d8a6ed8d5d3526941a0c7202f9da87c4083d6205564"
+        },
+        {
+          "file": "run-50.log",
+          "sha256": "3d693847916386d6b69b19d0f321906190e26c28ae59a197738b73fcd44b03d2"
+        }
+      ]
+    }
+  ],
+  "branchProtection": {
+    "branch": "main",
+    "strict": true,
+    "checks": [
+      {
+        "context": "M3 required checks",
+        "app_id": 15368
+      }
+    ],
+    "enforceAdmins": true,
+    "allowForcePushes": false,
+    "allowDeletions": false
+  },
+  "supersedes": {
+    "run": 37728405897,
+    "head": "a2935e69f10b38f6f3578453b240b359a8a2d1bb",
+    "conclusion": "failure",
+    "cause": "Optional smoke npm install ETARGET for retired @mariozechner/pi-coding-agent@0.87.1; all required matrices and 200 stability reruns passed. Original run retained, not retried or excluded."
+  }
+}

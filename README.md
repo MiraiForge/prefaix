@@ -1,7 +1,7 @@
 # prefaix
 
 Prefix your prompt with `:` and keep working in your shell. Prefaix connects
-zsh, fish, and bash to [pi](https://github.com/badlogic/pi-mono), streams its
+zsh, fish, and bash to [pi](https://pi.dev), streams its
 answer below your prompt, and returns your terminal when the turn ends.
 
 The M3 implementation is under validation. **The npm package is not published
@@ -19,7 +19,7 @@ but **0.1.0 has not shipped**.
 | **M0 — Foundations** | Complete | Strict TypeScript tooling, builds, CI, architecture/ADRs, layering checks, and private-package safeguards. | Ongoing maintenance. |
 | **M1 — Design spikes** | Complete for measured decisions | S1 lifecycle; S2 pool economics; S3 safe cwd policy; S4–S7 shell/addon/tty mechanics; S8 macOS/Linux startup; S9 bridge/tools/UI. Eleven reviewed native pi fixtures. | Broader terminal/addon versions; the separate controlled native dialog hardening is now verified on pi 1.0.4, not merely inferred from replay. |
 | **M2 — Core** | Complete | Backend-independent AgentPort, fake and pi adapters, bridge, daemon/pool/store, foreground client, safe directives, renderer, CLI, and contracts; cumulative usage/cache-cost accounting, verified live provider/model selection, and resume/bridge/UI fixes. | Ongoing hardening and wider compatibility. Long-held pi 1.0.4 dialogs now use paused acceptance deadlines and safe child replacement on abort. |
-| **M3 — Triple-shell MVP → 0.1.0** | Implemented; acceptance in progress | zsh/fish/bash plugins, bash 3.2 fallback, MVP commands, pickers, prompt status, doctor, setup/uninstall, docs, and passing macOS/Linux shell/version and performance CI at `72d512b`. | Fresh release-artifact CI/stability, human walkthrough/daily-use checks, required-check enforcement, release preparation, and explicit publishing approval. |
+| **M3 — Triple-shell MVP → 0.1.0** | Implemented; acceptance in progress | zsh/fish/bash plugins, bash 3.2 fallback, MVP commands, pickers, prompt status, doctor, setup/uninstall, docs, and green exact-head macOS/Linux CI at `d2de470`, including four 50/50 stability gates and enforced main checks. | Keep the eventual release artifact green; human walkthrough/daily-use checks, release preparation, and explicit publishing approval. |
 | **M4 — Parity and beyond Forge** | In progress | Built-in/custom personas and `:plan` → `:go`, with native tool/transcript verification. | Command suggestions and commit drafting, detach/attach, steering, completions, TUI handoff, additional conversation commands, richer context capture, and terminal polish. |
 | **M5 — Hardening → 1.0** | Planned | Backend abstraction and safety checks to build on. | A second adapter and backend switching, security review, wider distribution/docs site, WSL/terminal validation, and conditional compiled-client/ble.sh work. |
 
@@ -40,19 +40,18 @@ its pending hook gracefully.
 **Next: finish the 0.1.0 acceptance and release gates.**
 
 - Keep supported-shell/version and performance CI green for the release
-  artifact. [CI at 72d512b](docs/VALIDATION.md#native-ci-evidence-2026-10-07)
-  is green on both platforms. That recorded run does not validate later changes:
-  require a green run for the new commits and fresh frozen-artifact stability
-  evidence before release acceptance. The subsequent latest-main run at
-  `e2aaa27` failed a busy-turn test and macOS Node 22 timing budgets;
-  [the local follow-up](docs/VALIDATION.md#ci-and-native-dialog-follow-up-2026-10-08)
-  is not yet fresh green CI.
+  artifact. [Exact-head CI at d2de470](docs/VALIDATION.md#green-exact-head-ci-and-main-protection-2026-10-08)
+  passes all **18 jobs**, including four frozen **50/50** native shell stability
+  gates: **200 reruns, zero failures**, on Linux/macOS floor/current pairs.
+  The busy-turn and macOS Node 22 timing failures are fixed. This validates that
+  committed artifact, not subsequent code or an unapproved release.
 - Confirm a clean daily-driver doctor result, a fresh-machine README walkthrough,
   and three days of daily use on at least two shells without tty corruption or
   lost typeahead.
-- Enforce the required CI checks and prepare/verify npm trusted publishing and
-  the prefaix.dev placeholder. Publishing still needs Allan's explicit approval;
-  the package stays private until then.
+- Maintain the now-enforced **`M3 required checks`** on `main` (strict,
+  GitHub Actions-bound, administrators included). Prepare/verify npm trusted
+  publishing and the prefaix.dev placeholder. Publishing still needs Allan's
+  explicit approval; the package stays private until then.
 
 The [detailed roadmap](docs/ROADMAP.md) defines tasks and acceptance criteria;
 the [validation guide](docs/VALIDATION.md) and [release gate](docs/RELEASE.md)
@@ -61,15 +60,17 @@ this section is a public progress summary, not a separate task tracker.
 
 ### Local validation snapshot
 
-The completed M1/hardening changes passed these local gates on **2026-10-07**:
+The persona/CI/dialog hardening passed these local gates on **2026-10-08**;
+[the separate native CI record](docs/VALIDATION.md#green-exact-head-ci-and-main-protection-2026-10-08)
+now verifies the supported OS/version matrix:
 
 | Gate | Result and scope |
 |---|---|
-| `bun run check` | Lint/typecheck/unit and contract tests: **1,818 passed**, 10 expected broken-backend failures, 10 opt-in skips. |
-| `bun run coverage` | **97.74% statements / 95.60% branches / 95.89% functions / 98.07% lines**; all exceed 95%. |
-| Shell PTY suites | **134 passed** on each Linux floor/current pair; complete bash 5.1/5.2 suites **60 passed each**. Optional terminal/platform cases stay labeled as skips. |
+| `bun run check` | Lint/typecheck/unit and contract tests: **1,911 passed**, 10 expected broken-backend failures, 10 opt-in skips. |
+| `bun run coverage` | **97.83% statements / 95.76% branches / 96.04% functions / 98.16% lines**; all exceed 95%. |
+| Shell PTY suites | **125 passed**, 19 optional skips on the available modern Linux shells; supported floor/current pairs are validated separately in native CI. Optional terminal/platform cases stay labeled as skips. |
 | Build and `test:pi-smoke` | Distributable bundles build; real pi **1.0.4** answers offline RPC queries, idle abort, and shutdown without a prompt, model request, or credentials. |
-| `test:perf` | Built client/daemon with **FakeAgent**: hello p50/p95 **32.31/37.20ms**, first-token p50 **50.36ms**, about **25,933 deltas/s**; maximum idle daemon RSS **54.62MiB**, below the **57.22MiB** budget. |
+| `test:perf` | Built client/daemon with **FakeAgent**: Linux Node 22 hello p50/p95 **27.33/32.78ms**, first-token p50/p95 **44.54/49.52ms**, slowest burst **32,476 deltas/s**; maximum idle daemon RSS **56.17MiB**, below the **57.22MiB** budget. |
 | Docs/package/style guards | Generated config reference matches the schema; `private: true` remains set; formatting and diff-whitespace checks pass. |
 
 These gates do not establish real-provider latency or credential validity,
@@ -92,7 +93,7 @@ bun run build
 npm install --global .
 ```
 
-Install and configure pi using its [installation instructions](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent).
+Install and configure pi using its [installation instructions](https://github.com/earendil-works/pi#getting-started).
 The minimum supported pi is 0.87.1; current native lifecycle/bridge evidence
 uses pi 1.0.4. Authenticate with your preferred provider and choose a model in
 pi before your first real prompt.
