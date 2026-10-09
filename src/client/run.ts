@@ -293,11 +293,12 @@ export async function run(options: RunOptions): Promise<ExitCode> {
   const client = connect({ paths, version: options.version });
 
   const directives: Directives = { nonce: args.nonce };
-  // Assigned on every branch below; declared without a value so the compiler
-  // insists each path sets it.
-  let exit: ExitCode;
+  // Cleanup reads the outcome too, so its fallback is deliberately fail-closed.
+  let exit: ExitCode = EXIT.agentError;
   let tty: TtyController | undefined;
   let releaseGuards: (() => void) | undefined;
+  let editBuffer: string | undefined;
+  let editController: AbortController | undefined;
 
   try {
     await client.connect();
@@ -305,6 +306,7 @@ export async function run(options: RunOptions): Promise<ExitCode> {
     let text: string | undefined;
     let persona: string | undefined;
     let executePlan: boolean | undefined;
+    let edit: "suggest" | undefined;
     let conversationId = args.conversationId;
     exit = EXIT.ok;
     if (parsed.kind === "command") {
@@ -323,6 +325,7 @@ export async function run(options: RunOptions): Promise<ExitCode> {
       if (conversationId !== "") directives.conversation = conversationId;
       text = result.text;
       executePlan = result.executePlan;
+      edit = result.edit;
     } else if (parsed.kind === "agent") {
       text = `/${parsed.name} ${parsed.args}`.trim();
     } else {
@@ -343,6 +346,7 @@ export async function run(options: RunOptions): Promise<ExitCode> {
     }
     if (text !== undefined) {
       const controller = new AbortController();
+      if (edit !== undefined) editController = controller;
       tty = startTty(options, controller, renderer);
       releaseGuards = installExitGuards(() => tty?.restore());
       tty.enter();
@@ -363,9 +367,11 @@ export async function run(options: RunOptions): Promise<ExitCode> {
         },
         ...(persona === undefined ? {} : { persona }),
         ...(executePlan === undefined ? {} : { executePlan }),
+        ...(edit === undefined ? {} : { edit }),
       });
       exit = result.exit;
       conversationId = result.conversationId;
+      editBuffer = result.buffer;
     }
     if (conversationId !== "") {
       directives.conversation = conversationId;
@@ -400,6 +406,16 @@ export async function run(options: RunOptions): Promise<ExitCode> {
       err(`${cause.hint}\n`);
     }
   } finally {
+    releaseGuards?.();
+    tty?.restore();
+    // Post-turn metadata and even a key flushed during tty restoration can
+    // withdraw an edit. Only apply its generated buffer after those succeed.
+    if (editController?.signal.aborted && exit === EXIT.ok) {
+      exit = EXIT.aborted;
+      directives.status = "prefaix · aborted";
+    }
+    if (exit === EXIT.ok && editBuffer !== undefined)
+      renderer.handle({ type: "set_buffer", text: editBuffer });
     // Prompt hooks refresh from this file after applying the directives. The
     // foreground owns the final rich status once the daemon ends the turn.
     if (directives.status !== undefined) {
@@ -407,8 +423,6 @@ export async function run(options: RunOptions): Promise<ExitCode> {
         () => undefined,
       );
     }
-    releaseGuards?.();
-    tty?.restore();
     const buffer = bufferFrom(renderer, tty);
     if (buffer !== "") directives.buffer = buffer;
     renderer.close();
@@ -479,6 +493,7 @@ interface TurnOptions {
   readonly text: string;
   readonly persona?: string;
   readonly executePlan?: boolean;
+  readonly edit?: "suggest";
   readonly controller: AbortController;
   readonly setTurnId: (turnId: string) => void;
   readonly setConversationId: (conversationId: string) => void;
@@ -487,6 +502,7 @@ interface TurnOptions {
 interface TurnRun {
   readonly exit: ExitCode;
   readonly conversationId: string;
+  readonly buffer?: string;
 }
 
 async function runTurn(options: TurnOptions): Promise<TurnRun> {
@@ -519,11 +535,12 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
   ended.catch(() => undefined);
   client.onEvent((turnId, { event }) => {
     options.setTurnId(turnId);
-    renderer.handle(event);
+    if (options.edit === undefined || event.type !== "set_buffer")
+      renderer.handle(event);
   });
 
   const started = await client.call<{ turnId: string; conversationId: string }>(
-    "turn.start",
+    options.edit === undefined ? "turn.start" : "turn.suggest",
     {
       ...(args.conversationId === ""
         ? {}
@@ -532,6 +549,7 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
       cwd: built.context.cwd,
       env: built.agentEnv,
       text: options.text,
+      ...(options.edit === undefined ? {} : { edit: options.edit }),
       ...(options.persona === undefined ? {} : { persona: options.persona }),
       ...(options.executePlan === undefined
         ? {}
@@ -558,9 +576,16 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
   if (options.controller.signal.aborted) onAbort();
   try {
     const summary = await ended;
+    // Keep the authoritative proposal private until client metadata and tty
+    // cleanup succeed too. Early editor UI/tool buffers remain ignored.
     return {
       conversationId: started.conversationId,
       exit: exitForSummary(summary),
+      ...(options.edit !== undefined &&
+      summary.status === "stop" &&
+      summary.buffer !== undefined
+        ? { buffer: summary.buffer }
+        : {}),
     };
   } finally {
     options.controller.signal.removeEventListener("abort", onAbort);
@@ -585,6 +610,7 @@ interface CommandResult {
   conversationId?: string;
   text?: string;
   executePlan?: boolean;
+  edit?: "suggest";
 }
 
 function shellInfo(args: RunArgs) {
@@ -669,6 +695,13 @@ async function runCommand(
     env: filterEnv(env, config.env),
   };
   switch (parsed.name) {
+    case "suggest":
+    case "s":
+      if (parsed.args.trim() === "")
+        throw new PrefaixError("USAGE", ":suggest requires a request", {
+          hint: "Use :suggest <what the command should do>.",
+        });
+      return { exit: EXIT.ok, text: parsed.args, edit: "suggest" };
     case "go":
       if (args.conversationId === "")
         throw new PrefaixError(

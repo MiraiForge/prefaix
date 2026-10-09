@@ -129,6 +129,95 @@ afterEach(async () => {
   rmSync(home, { recursive: true, force: true });
 });
 
+describe("suggest command workflows", () => {
+  it.each([":suggest find a file", ":s find a file", ": suggest find a file"])(
+    "routes %s as a distinct edit operation",
+    async (line) => {
+      await start();
+      const calls: string[] = [];
+      expect(
+        await invoke(line, "", {
+          connect: (options) => {
+            const client = new DaemonClient(options);
+            const call = client.call.bind(client);
+            client.call = async (op, params) => {
+              calls.push(op);
+              return call(op, params);
+            };
+            return client;
+          },
+        }),
+      ).toBe(0);
+      expect(calls).toContain("turn.suggest");
+      expect(calls).not.toContain("turn.start");
+      expect(directives().buffer).toBe("printf '%s\\n' 'fake suggestion'");
+      expect(activeSession().lastPrompt?.text).toBe("find a file");
+      expect(activeSession().lastPrompt?.commandProposal).toBe(true);
+    },
+  );
+  it.each([":s", ":suggest", ":suggest   "])(
+    "rejects empty %s without a prompt",
+    async (line) => {
+      await start();
+      expect(await invoke(line)).toBe(2);
+      expect(errors.join("")).toContain(":suggest requires a request");
+      expect(await daemon!.store.list()).toEqual([]);
+      expect(directives().buffer).toBeUndefined();
+    },
+  );
+  it("returns literal command data plus separate user typeahead and restores raw mode", async () => {
+    const command = "printf '%s' 日本語🙂\n\techo done";
+    await start({ PREFAIX_FAKE_PROPOSAL: command });
+    const terminal = input();
+    expect(
+      await invoke(":s do it", "", {
+        tty: terminal.tty,
+        connect: (options) => {
+          const client = new DaemonClient(options);
+          const call = client.call.bind(client);
+          client.call = async (op, params) => {
+            if (op === "turn.suggest") terminal.send("typed later");
+            return call(op, params);
+          };
+          return client;
+        },
+      }),
+    ).toBe(0);
+    expect(directives().buffer).toBe(command + "\ntyped later");
+    expect(terminal.modes).toEqual([true, false]);
+  });
+  it.each(["metadata failure", "late abort"])(
+    "withdraws the generated buffer on %s after settlement",
+    async (failure) => {
+      await start();
+      const terminal = input();
+      const exit = await invoke(":s find file", "", {
+        tty: terminal.tty,
+        connect: (options) => {
+          const client = new DaemonClient(options);
+          const call = client.call.bind(client);
+          client.call = async (op, params) => {
+            if (op === "status.get" && failure === "metadata failure")
+              throw new Error("metadata failed");
+            if (op === "commands.list" && failure === "late abort")
+              terminal.send("\x03");
+            return call(op, params);
+          };
+          return client;
+        },
+      });
+      expect(exit).toBe(failure === "late abort" ? 130 : 1);
+      expect(directives().buffer).toBeUndefined();
+      expect(terminal.modes).toEqual([true, false]);
+    },
+  );
+  it("does not turn prose into a command when no proposal was returned", async () => {
+    await start({ PREFAIX_FAKE_SCENARIO: "tools" });
+    expect(await invoke(":s find file")).toBe(1);
+    expect(directives().buffer).toBeUndefined();
+  });
+});
+
 describe("persona command workflows", () => {
   it("routes built-ins, preserves the persona, and executes a plan in the same conversation", async () => {
     await start();

@@ -58,6 +58,7 @@ export interface Capabilities {
   uiDialogs: boolean;
   contextSections: boolean; // can take per-turn context out-of-band
   personasWithoutRespawn: boolean;
+  commandProposals: boolean;
   handoffTui: boolean;
 }
 
@@ -130,6 +131,8 @@ export interface PromptInput {
   text: string;
   context: ShellContext;
   persona?: PersonaSpec;
+  /** A structured, non-executing edit turn; never changes the saved persona. */
+  commandProposal?: boolean;
 }
 
 export type UiResponse =

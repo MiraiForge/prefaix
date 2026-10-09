@@ -21,6 +21,7 @@ export interface TurnContextFile {
   readonly version: number;
   readonly context: ShellContext;
   readonly persona?: PersonaSpec;
+  readonly commandProposal?: boolean;
 }
 
 export function turnContextFile(dir: string, pid: number): string {

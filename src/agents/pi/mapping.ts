@@ -27,6 +27,8 @@ import {
   type PiRecord,
 } from "./types.js";
 import { toolEndSummary, toolPreview, toolSummary } from "./tool-summaries.js";
+import { parseCommandProposal } from "../../core/command-proposal.js";
+import { PROPOSE_COMMAND } from "./command-proposal.js";
 
 type DialogMethod = "select" | "confirm" | "input" | "editor";
 
@@ -40,6 +42,7 @@ const UI_KINDS: Readonly<Record<DialogMethod, UiRequestKind>> = {
 };
 
 export interface MapperOptions {
+  readonly commandProposals?: boolean;
   /** Minimum gap between tool_update events, per DESIGN §4.5.3. */
   readonly toolUpdateThrottleMs?: number;
   /**
@@ -120,6 +123,7 @@ export class TurnMapper {
 
   constructor(options: MapperOptions = {}) {
     this.#options = {
+      commandProposals: options.commandProposals ?? false,
       toolUpdateThrottleMs: options.toolUpdateThrottleMs ?? 100,
       usageThrottleMs: options.usageThrottleMs ?? 250,
       now: options.now ?? (() => Date.now()),
@@ -254,6 +258,25 @@ export class TurnMapper {
           ? {}
           : { ms: Math.max(0, this.#options.now() - tool.startedAt) }),
       });
+      if (
+        this.#options.commandProposals &&
+        !isError &&
+        tool?.name === PROPOSE_COMMAND &&
+        !id.includes("/")
+      ) {
+        const proposal = parseCommandProposal(
+          asRecord(record["result"])?.["details"],
+        );
+        if (proposal !== undefined) {
+          out.push({ type: "set_buffer", text: proposal.command });
+          if (proposal.explanation !== "")
+            out.push({
+              type: "notice",
+              level: "info",
+              text: proposal.explanation,
+            });
+        }
+      }
       this.#tools.delete(id);
       return out;
     }
@@ -312,7 +335,12 @@ export class TurnMapper {
 
     if (type === "extension_ui_request") {
       out.push(...this.#begin());
-      out.push(...this.#mapUiRequest(fields));
+      out.push(
+        ...this.#mapUiRequest(fields).filter(
+          (event) =>
+            !this.#options.commandProposals || event.type !== "set_buffer",
+        ),
+      );
       return out;
     }
 

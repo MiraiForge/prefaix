@@ -4,7 +4,7 @@
 // makes a turn safe to abandon: after an abort the leftover records are dropped
 // rather than leaking into the next turn's stream.
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
 import { PrefaixError, messageOf } from "../../core/errors.js";
@@ -270,7 +270,10 @@ export class PiSession implements AgentSession {
     const controller = new AbortController();
     this.#turnAbort = controller;
     const turn = AbortSignal.any([signal, controller.signal]);
-    const mapper = new TurnMapper(this.#mapperOptions);
+    const mapper = new TurnMapper({
+      ...this.#mapperOptions,
+      commandProposals: input.commandProposal === true,
+    });
     this.#mapper = mapper;
     let iterator: AsyncIterator<PiRecord> | undefined;
 
@@ -381,8 +384,35 @@ export class PiSession implements AgentSession {
    * per child, so there is no race between the file and the prompt (ADR 0004).
    */
   #compose(input: PromptInput): string {
+    if (input.commandProposal === true) {
+      let supported = false;
+      if (
+        this.#bridgeLive &&
+        this.#turnsDir !== undefined &&
+        this.#pid !== undefined
+      ) {
+        try {
+          const ready = JSON.parse(
+            readFileSync(bridgeReadyFile(this.#turnsDir, this.#pid), "utf8"),
+          ) as { commandProposals?: unknown };
+          supported = ready.commandProposals === true;
+        } catch {
+          /* Malformed/legacy readiness is not structured-edit support. */
+        }
+      }
+      if (!supported)
+        throw new PrefaixError(
+          "UNSUPPORTED",
+          "this pi child cannot propose commands because the bridge tool is unavailable",
+          { hint: "Use the current pi package and bundled prefaix bridge." },
+        );
+    }
     if (this.#publishContext(input)) {
-      return input.text;
+      // Prevent a slash-prefixed request from dispatching a native extension
+      // command instead of the guarded edit turn.
+      return input.commandProposal === true
+        ? `Request for a suggested shell command:\n${input.text}`
+        : input.text;
     }
     if (this.#bridgeLive) {
       // Spawn kept the normal tools so the bridge can restore them later.
@@ -409,6 +439,7 @@ export class PiSession implements AgentSession {
     const payload: TurnContextFile = {
       version: BRIDGE_VERSION,
       context: input.context,
+      ...(input.commandProposal === true ? { commandProposal: true } : {}),
       ...(input.persona === undefined && this.#persona === undefined
         ? {}
         : { persona: input.persona ?? (this.#persona as PersonaSpec) }),

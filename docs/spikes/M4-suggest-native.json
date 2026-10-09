@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "evidence": "controlled-scripted-loopback",
+  "remoteModelRequests": 0,
+  "captures": [
+    {
+      "source": "controlled",
+      "provider": "kimi-coding",
+      "model": "kimi-coding/k3",
+      "piVersion": "1.0.4",
+      "recordedAt": "2026-10-09T01:26:32.423Z",
+      "stimulus": {
+        "api": "loopback-stub",
+        "remoteModelRequests": 0,
+        "scriptedUsage": true
+      },
+      "status": "passed",
+      "platform": "linux",
+      "arch": "x64",
+      "driver": "v26.3.0",
+      "sameChild": true,
+      "remoteModelRequests": 0,
+      "apiRequests": 3,
+      "toolSets": [
+        ["bash", "edit", "read", "write"],
+        ["propose_command"],
+        ["bash", "edit", "read", "write"]
+      ],
+      "transcriptTools": [
+        ["bash", "edit", "read", "write"],
+        ["propose_command"],
+        ["bash", "edit", "read", "write"]
+      ],
+      "turns": [
+        {
+          "edit": false,
+          "loopbackRequests": 1,
+          "settlements": 1,
+          "bufferCount": 0,
+          "generatedCommandExecuted": false
+        },
+        {
+          "edit": true,
+          "loopbackRequests": 1,
+          "settlements": 1,
+          "bufferCount": 1,
+          "generatedCommandExecuted": false
+        },
+        {
+          "edit": false,
+          "loopbackRequests": 1,
+          "settlements": 1,
+          "bufferCount": 0,
+          "generatedCommandExecuted": false
+        }
+      ],
+      "rawSha256": {
+        "api-requests.json": "2f03024dffb2b4af2b6c54035686d8c39953787fd12ca60a89b19621ae3d7049",
+        "sessions/2026-10-09T01-26-32-551Z_pfx-01M4F49QQAEV5NXW71R1YD91HV.jsonl": "93a467f8d46e72f99141d5c890453cf81d519f3416831d399d9d199b4d5184da",
+        "suggest.jsonl": "784a4c6d2abe7998efcd34573d1444d306c23fdafb616db7cfa21848ff180a1c",
+        "suggest.stderr.log": "7f5c35285c82b04580425f2b79c0d48b89c5283935f53f441ffaf3f46e7742a5",
+        "suggest.trace.jsonl": "92bb7c5e9679b1f4236849ea0b4896dca1afcf8415871ce3f076d6577e263cb8",
+        "summary.json": "69e3c1b264f3285b5c2d5cdf60f41681aeff83f6751ef5013c0c3e763a32a7f6"
+      }
+    },
+    {
+      "source": "controlled",
+      "provider": "kimi-coding",
+      "model": "kimi-coding/k3",
+      "piVersion": "1.1.0",
+      "recordedAt": "2026-10-09T01:24:55.899Z",
+      "stimulus": {
+        "api": "loopback-stub",
+        "remoteModelRequests": 0,
+        "scriptedUsage": true
+      },
+      "status": "passed",
+      "platform": "linux",
+      "arch": "x64",
+      "driver": "v26.3.0",
+      "sameChild": true,
+      "remoteModelRequests": 0,
+      "apiRequests": 3,
+      "toolSets": [
+        ["bash", "edit", "read", "write"],
+        ["propose_command"],
+        ["bash", "edit", "read", "write"]
+      ],
+      "transcriptTools": [
+        ["bash", "edit", "read", "write"],
+        ["propose_command"],
+        ["bash", "edit", "read", "write"]
+      ],
+      "turns": [
+        {
+          "edit": false,
+          "loopbackRequests": 1,
+          "settlements": 1,
+          "bufferCount": 0,
+          "generatedCommandExecuted": false
+        },
+        {
+          "edit": true,
+          "loopbackRequests": 1,
+          "settlements": 1,
+          "bufferCount": 1,
+          "generatedCommandExecuted": false
+        },
+        {
+          "edit": false,
+          "loopbackRequests": 1,
+          "settlements": 1,
+          "bufferCount": 0,
+          "generatedCommandExecuted": false
+        }
+      ],
+      "rawSha256": {
+        "api-requests.json": "164b69f4d45a312d0fa601326455b8b5e2ad6f506a970cef04511cb22cba64dc",
+        "sessions/2026-10-09T01-24-56-037Z_pfx-01M4F46SEYN76YX5J40JPJ09CZ.jsonl": "c56f8faf003dc5ac7725f38e42aa8bab405ca30a51d792a6f24a587ce911eb3a",
+        "suggest.jsonl": "d883825c3690c471c11242859f2e8368a7848e5f651a0d96f370e0833239ebe1",
+        "suggest.stderr.log": "202d9755b81f041f2fd608f2ff2b8ddca1c7a9d1e159687e7b1651680f6b124e",
+        "suggest.trace.jsonl": "00a7ad97ccbddc37f0123a1513c3504445e60319fa55e79e4534fefac65ad043",
+        "summary.json": "2986f3bf0a9db79446e942c49fd2695e67e75eb4abcec6a16a80d644e37390ab"
+      }
+    }
+  ]
+}
