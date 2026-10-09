@@ -178,6 +178,16 @@ private and no release is implied by this implementation.
 
 ---
 
+**M4-1 candidate (2026-10-09):** `:suggest`/`:s`, structured non-executing
+proposal tooling, dedicated-model restoration, and safe final buffer routing
+are implemented locally. Scenario 10 passes on installed zsh/fish/bash: the
+command stays editable, cancellation leaves no sentinel, and only explicit
+Enter executes it. Controlled native pi 1.0.4 and 1.1.0 loopback probes each
+verify one proposal-only request, termination without an automatic follow-up,
+and restoration on the same child. [Evidence](spikes/M4-suggest.md). Supported
+platform CI for this new slice, review, and merge remain separate from the
+already validated protected-main artifact and the M3 human/release gate.
+
 **M4-5 state (2026-10-08):** built-in/custom persona commands, persistent
 selection, and `:plan` → `:go` are implemented and review-hardened. Native pi 1.0.4 against an
 isolated loopback API verifies tool schemas, transcript tool deltas, normal-tool
@@ -190,7 +200,8 @@ verification](spikes/native-dialogs.md) now covers deadlines, signal/method abor
 and silent preflight timeout without orphaned requests. Safe abort terminates
 the owned child and resumes its native conversation on a replacement. This is
 not graceful native hook cancellation or a waiver of the M3 gate; the other
-M4 groups remain dependency-blocked on M3 CI acceptance.
+M4 groups retain their roadmap dependencies and do not close the outstanding
+M3 human/release gates. The automated M3 CI dependency is satisfied.
 
 ## M5 — Hardening → 1.0 (ongoing)
 

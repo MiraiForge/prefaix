@@ -124,11 +124,13 @@ export interface FakeSessionOptions {
   readonly scenario: Scenario;
   /** One pacing tick between steps. A test replaces this with a gate. */
   readonly tick: () => Promise<void>;
+  readonly commandProposal?: string;
 }
 
 export class FakeSession implements AgentSession {
   readonly native: NativeRef;
   readonly #scenario: Scenario;
+  readonly #commandProposal: string | undefined;
   readonly #tick: () => Promise<void>;
   readonly #transcript: FakeTranscript;
   #blocks = new Map<number, string>();
@@ -153,6 +155,7 @@ export class FakeSession implements AgentSession {
   ) {
     this.#transcript = transcript;
     this.#scenario = options.scenario;
+    this.#commandProposal = options.commandProposal;
     this.#tick = options.tick;
     this.native = { sessionId: transcript.sessionId };
     this.lastRoot = lastRoot;
@@ -211,7 +214,20 @@ export class FakeSession implements AgentSession {
     }
 
     let sawUsage = false;
-    for (const step of this.#scenario) {
+    const steps: Scenario =
+      input.commandProposal === true && this.#commandProposal !== undefined
+        ? [
+            { type: "turn_start" },
+            {
+              type: "text_delta",
+              block: 0,
+              text: "Review this fake command before pressing Enter.",
+            },
+            { type: "text_end", block: 0 },
+            { type: "set_buffer", text: this.#commandProposal },
+          ]
+        : this.#scenario;
+    for (const step of steps) {
       if (step.type === "await_ui") {
         const answer = await this.#awaitUi(signal);
         if (signal.aborted) {
@@ -498,6 +514,7 @@ export class FakeAgent implements AgentBackend {
   readonly capabilities: Capabilities;
   readonly #scenarioName: string;
   readonly #steps: Scenario | undefined;
+  readonly #commandProposal: string | undefined;
   readonly #tick: () => Promise<void>;
   // Transcripts live for the process, so a conversation resumed inside one
   // daemon keeps its history. Nothing survives a restart, which is fine: the
@@ -517,6 +534,10 @@ export class FakeAgent implements AgentBackend {
       options.sleep ?? (burst ? () => Promise.resolve() : defaultSleep);
     this.#tick = () => sleep(tickMs);
     this.#steps = options.steps;
+    this.#commandProposal =
+      this.#scenarioName === DEFAULT_SCENARIO && options.steps === undefined
+        ? (env["PREFAIX_FAKE_PROPOSAL"] ?? "printf '%s\\n' 'fake suggestion'")
+        : undefined;
     this.capabilities = { ...FAKE_CAPABILITIES, ...options.capabilities };
   }
 
@@ -568,7 +589,13 @@ export class FakeAgent implements AgentBackend {
 
     const session = new FakeSession(
       transcript,
-      { scenario: steps, tick: this.#tick },
+      {
+        scenario: steps,
+        tick: this.#tick,
+        ...(this.#commandProposal === undefined
+          ? {}
+          : { commandProposal: this.#commandProposal }),
+      },
       opts.root,
     );
     if (opts.persona !== undefined) {

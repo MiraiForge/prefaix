@@ -15,5 +15,6 @@ export const FAKE_CAPABILITIES: Capabilities = {
   uiDialogs: true,
   contextSections: true,
   personasWithoutRespawn: true,
+  commandProposals: true,
   handoffTui: false, // :tui hands off to pi
 };

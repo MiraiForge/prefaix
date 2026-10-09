@@ -50,6 +50,7 @@ const CAPABILITIES: Capabilities = {
   uiDialogs: true,
   contextSections: true,
   personasWithoutRespawn: true,
+  commandProposals: false,
   handoffTui: false,
 };
 
