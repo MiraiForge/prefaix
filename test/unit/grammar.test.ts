@@ -124,10 +124,10 @@ const CASES: readonly [string, Expect][] = [
       name: "suggest",
       args: "how do I bisect",
       class: "edit",
-      known: false,
+      known: true,
     },
   ],
-  [":s", { kind: "command", name: "s", args: "", class: "edit", known: false }],
+  [":s", { kind: "command", name: "s", args: "", class: "edit", known: true }],
   [
     ": commit",
     { kind: "command", name: "commit", args: "", class: "edit", known: false },

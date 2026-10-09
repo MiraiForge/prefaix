@@ -18,11 +18,13 @@ import {
 import { join } from "node:path";
 import { shellHintsFile } from "../core/paths.js";
 import { PrefaixError, unsupported, messageOf } from "../core/errors.js";
+import { parseCommandProposal } from "../core/command-proposal.js";
 import { newRecord, summarize, titleFrom } from "./store.js";
 import type { ConversationRecord, ConversationStore } from "./store.js";
 import type {
   AgentEvent,
   AgentSession,
+  AgentState,
   PersonaSpec,
   UiResponse,
 } from "../core/agent-port.js";
@@ -436,7 +438,17 @@ export class Operations {
     connection: Connection,
   ): Promise<TurnStartResult> {
     this.#checkOpen();
-    if (params.text.startsWith("/"))
+    if (params.edit !== undefined) {
+      if (
+        params.edit !== "suggest" ||
+        params.executePlan === true ||
+        params.persona !== undefined ||
+        params.text.trim() === ""
+      )
+        throw new PrefaixError("USAGE", "invalid suggest turn");
+      this.#options.pool.require("commandProposals");
+    }
+    if (params.edit === undefined && params.text.startsWith("/"))
       this.#options.pool.require("slashCommands");
     // Validate explicit names before creating a conversation as a side effect.
     const requestedPersona = this.#persona(params.persona);
@@ -638,10 +650,44 @@ export class Operations {
       status: "error",
       error: "the turn ended without a settle",
     };
+    let buffer: string | undefined;
+    let proposals = 0;
+    let restoreState: AgentState | undefined;
     try {
+      const model =
+        params.edit === "suggest"
+          ? this.#options.config.commands.suggest.model
+          : null;
+      if (model !== null) {
+        this.#options.pool.require("models");
+        restoreState = await session.state();
+        if (restoreState.model === undefined)
+          throw new PrefaixError(
+            "UNSUPPORTED",
+            "cannot restore the current model after :suggest",
+          );
+        if (
+          restoreState.thinking !== undefined &&
+          session.setThinking === undefined
+        )
+          throw new PrefaixError(
+            "UNSUPPORTED",
+            "cannot restore the current thinking level after :suggest",
+          );
+        const matches = (await session.listModels()).filter(
+          (ref) => model === `${ref.provider}/${ref.id}` || model === ref.id,
+        );
+        if (matches.length !== 1)
+          throw new PrefaixError(
+            "CONFIG_INVALID",
+            `suggest model ${JSON.stringify(model)} is unavailable or ambiguous`,
+          );
+        await session.setModel(matches[0]!);
+      }
       for await (const event of session.prompt(
         {
           text: params.text,
+          ...(params.edit === "suggest" ? { commandProposal: true } : {}),
           context: {
             shell: params.shell,
             cwd: params.cwd,
@@ -663,7 +709,16 @@ export class Operations {
         if (event.type === "ui_request") {
           this.#options.turns.openDialog(turn, event.id);
         }
-        this.publish(turn, event);
+        if (params.edit !== undefined && event.type === "set_buffer") {
+          proposals += 1;
+          buffer = parseCommandProposal({
+            command: event.text,
+            explanation: "",
+          })?.command;
+          continue;
+        }
+        if (params.edit === undefined || event.type !== "settled")
+          this.publish(turn, event);
         const pending = this.#owned
           .get(turn.id)
           ?.waitWritable?.(turn.controller.signal);
@@ -681,18 +736,55 @@ export class Operations {
         text: aborted ? "turn aborted" : message,
         source: this.#options.pool.backend.id,
       });
-      this.publish(turn, {
-        type: "settled",
-        stopReason: aborted ? "aborted" : "error",
-        ...(summary.error === undefined ? {} : { error: summary.error }),
-      });
+      if (params.edit === undefined)
+        this.publish(turn, {
+          type: "settled",
+          stopReason: aborted ? "aborted" : "error",
+          ...(summary.error === undefined ? {} : { error: summary.error }),
+        });
+    } finally {
+      if (restoreState?.model !== undefined) {
+        try {
+          await session.setModel(restoreState.model);
+          if (
+            restoreState.thinking !== undefined &&
+            session.setThinking !== undefined
+          )
+            await session.setThinking(restoreState.thinking);
+        } catch (cause) {
+          await this.#options.pool.release(record.id);
+          if (summary.status !== "aborted")
+            summary = {
+              turnId: turn.id,
+              status: "error",
+              error: `could not restore the model after :suggest: ${messageOf(cause)}`,
+            };
+        }
+      }
     }
+    if (
+      params.edit !== undefined &&
+      summary.status === "stop" &&
+      (proposals !== 1 || buffer === undefined)
+    )
+      summary = {
+        turnId: turn.id,
+        status: "error",
+        error:
+          "the edit turn did not return exactly one valid command proposal",
+      };
 
     // The record is written before the client is told the turn ended, so a
     // `:info` or `conversations show` immediately after a turn reads a
     // conversation that already includes it.
     try {
-      await this.#recordOutcome(record.id, session, summary);
+      await this.#recordOutcome(
+        record.id,
+        session,
+        summary,
+        params.edit !== undefined,
+        restoreState,
+      );
     } catch (cause) {
       summary = {
         turnId: turn.id,
@@ -724,6 +816,20 @@ export class Operations {
         cause: messageOf(cause),
       });
     } finally {
+      if (params.edit !== undefined) {
+        // Esc during final metadata/persistence still withdraws the suggestion.
+        if (turn.controller.signal.aborted)
+          summary = { turnId: turn.id, status: "aborted" };
+        if (summary.status === "stop" && buffer !== undefined) {
+          summary = { ...summary, buffer };
+          this.publish(turn, { type: "set_buffer", text: buffer });
+        }
+        this.publish(turn, {
+          type: "settled",
+          stopReason: summary.status,
+          ...(summary.error === undefined ? {} : { error: summary.error }),
+        });
+      }
       this.#options.turns.finish(turn, summary);
     }
     const owner = this.#owned.get(turn.id);
@@ -737,6 +843,8 @@ export class Operations {
     conversationId: string,
     session: AgentSession,
     summary: TurnSummary,
+    edit = false,
+    restoreState?: AgentState,
   ): Promise<void> {
     // Re-read rather than reuse the snapshot taken when the turn started: a
     // second turn on the same conversation must count on top of the first, and
@@ -761,8 +869,10 @@ export class Operations {
     const lastAssistantText = await session
       .lastAssistantText()
       .catch(() => null);
+    const selection = restoreState ?? state;
     const patch: Partial<ConversationRecord> = {
       planReady:
+        !edit &&
         record.persona === "plan" &&
         summary.status === "stop" &&
         lastAssistantText !== null &&
@@ -775,8 +885,10 @@ export class Operations {
         ...(cost === undefined ? {} : { costUsd: cost }),
         ...(contextPct === undefined ? {} : { lastContextPct: contextPct }),
       },
-      ...(state?.model === undefined ? {} : { model: state.model }),
-      ...(state?.thinking === undefined ? {} : { thinking: state.thinking }),
+      ...(selection?.model === undefined ? {} : { model: selection.model }),
+      ...(selection?.thinking === undefined
+        ? {}
+        : { thinking: selection.thinking }),
     };
     try {
       await this.#options.store.update(record.id, patch);

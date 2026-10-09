@@ -172,7 +172,35 @@ command; an unknown tight name reports suggestions rather than prompting a model
 | Help (`:help`, `:?`) | `:help`; agent commands are included when connected |
 | Diagnose the installation | `:doctor` or `prefaix doctor` |
 | Run a pi command or skill | `:/command [args]`, e.g. `:/skill:review` |
-| Suggest, commit, detach/attach, TUI handoff | Planned for M4 |
+| Suggest a shell command without executing | `:suggest <want>`, `:s <want>`; review/edit the returned buffer, then press Enter |
+| Commit, detach/attach, TUI handoff | Planned for M4 |
+
+## Command suggestions
+
+`:suggest <want>` (or `:s <want>`) generates a command for the invoking
+zsh, fish, or bash shell and places it in the **editable prompt buffer**. It
+does not run the command. Inspect or edit it, cancel with Ctrl+C, or press
+Enter yourself to execute it.
+
+The pi bridge exposes only its structured `propose_command` tool during
+this turn and restores the previous tool set afterward. A missing bridge,
+malformed/duplicate proposal, failed or aborted turn, or failed finalization
+does not return a generated buffer. There is no prose-scraping fallback.
+The saved persona and conversation model remain unchanged.
+
+Optionally select a fast model for these turns:
+
+```toml
+[commands.suggest]
+model = "provider/model-id"
+```
+
+The model must be available in the backend. Its previous model/thinking
+selection is restored before the outcome is recorded; restoration failure
+discards the proposal and evicts the child. Suggestions still need human
+review: this tool restriction is **not a sandbox** for third-party extensions.
+[Implementation validation and controlled native evidence](docs/spikes/M4-suggest.md)
+are separate from M3 human acceptance and release approval.
 
 ## Personas
 

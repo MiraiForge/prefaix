@@ -406,7 +406,7 @@ function parseFirstLine(raw: string, options: GrammarOptions): Parsed {
 }
 
 function isImplemented(command: CommandSpec, options: GrammarOptions): boolean {
-  if (command.name === "go") return true;
+  if (command.name === "go" || command.name === "suggest") return true;
   const reached = options.implemented ?? "MVP";
   const order = { MVP: 0, M4: 1, M5: 2 } as const;
   return order[command.milestone] <= order[reached];

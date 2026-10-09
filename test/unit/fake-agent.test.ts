@@ -302,6 +302,7 @@ describe("fake capabilities", () => {
       uiDialogs: true,
       contextSections: true,
       personasWithoutRespawn: true,
+      commandProposals: true,
       handoffTui: false,
     });
   });

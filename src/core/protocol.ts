@@ -41,6 +41,8 @@ export interface TurnStartParams {
   persona?: string | null;
   /** Execute a completed plan in this exact conversation, with normal tools. */
   executePlan?: boolean;
+  /** Structured edit output, held until this turn successfully finishes. */
+  edit?: "suggest";
   context: TurnContextPayload;
   onDisconnect?: "abort" | "continue";
 }
@@ -183,6 +185,8 @@ export interface ModelListResult {
 /** Every operation the router knows, so a typo is a type error. */
 export interface Operations {
   "turn.start": { params: TurnStartParams; result: TurnStartResult };
+  /** Separate operation: old daemons must never treat an edit as a run turn. */
+  "turn.suggest": { params: TurnStartParams; result: TurnStartResult };
   "turn.abort": { params: TurnAbortParams; result: { turnId: string } };
   "ui.respond": { params: UiRespondParams; result: { ok: true } };
   "turn.attach": {
@@ -242,6 +246,7 @@ export type OperationName = keyof Operations;
 
 export const OPERATION_NAMES: readonly OperationName[] = [
   "turn.start",
+  "turn.suggest",
   "turn.abort",
   "ui.respond",
   "turn.attach",

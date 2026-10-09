@@ -19,6 +19,7 @@ export const PI_BASE_CAPABILITIES: Capabilities = {
   // adapter built without one is deliberately the fallback shape.
   contextSections: false,
   personasWithoutRespawn: false,
+  commandProposals: false,
 };
 
 export interface BridgeOptions {
@@ -34,7 +35,11 @@ export function piCapabilities(options: BridgeOptions = {}): Capabilities {
   return {
     ...PI_BASE_CAPABILITIES,
     ...(bridgeConfigured(options)
-      ? { contextSections: true, personasWithoutRespawn: true }
+      ? {
+          contextSections: true,
+          personasWithoutRespawn: true,
+          commandProposals: true,
+        }
       : {}),
   };
 }
