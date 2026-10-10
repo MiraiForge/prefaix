@@ -16,10 +16,13 @@ evidence. Beads `prefaix-mbd.13` is the release task.
 | Required checks | `M3 required checks` enforced for `main` through a branch rule |
 | Publishing approval | Allan's explicit go for the exact release version |
 
-`main` had no branch protection or repository rulesets when inspected during
-M3 implementation. A workflow in the repository does not itself configure
-GitHub's required checks. Configure that rule when the new workflow has run
-successfully and commit/push authority has been granted.
+On 2026-10-08, after Allan's approval and green exact-head CI at `d2de470`,
+`main` was protected with strict **`M3 required checks`**, bound to GitHub
+Actions and enforced for administrators; force pushes and deletion are blocked.
+The API read-back is recorded in the [acceptance evidence](VALIDATION.md#green-exact-head-ci-and-main-protection-2026-10-08).
+Future changes use PRs and must satisfy the check. This completes the required-
+checks gate, not human acceptance or publishing approval. Earlier unprotected-
+main observations are historical.
 
 `prefaix.dev` did not resolve in the implementation environment. Its placeholder
 is prepared in `site/index.html`, with a direct link to the README and no build

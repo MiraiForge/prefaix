@@ -3,9 +3,62 @@
 Beads epic `prefaix-mbd` owns the acceptance record. Passing local tests is not
 proof of Linux CI, a three-day user trial, or publication.
 
+## Green exact-head CI and main protection: 2026-10-08
+
+[CI run 37733087814](https://github.com/MiraiForge/prefaix/actions/runs/37733087814)
+is **green, attempt 1**, at
+`d2de470fbdfacd2ef6fcff6e62c2cfbba2b462cc`: all **18 jobs** passed. Six
+functional/coverage, six performance, four native shell-version jobs, the
+current pi **1.0.4** no-model smoke, and the required-check aggregate are green.
+All enforced coverage thresholds remain at 95% or better.
+
+Four **50/50** frozen stability gates cover Linux/macOS with bash 4.4/fish
+3.6.4 and bash 5.2/fish 4.0.2, stock zsh 5.9, and the macOS bash 3.2 fallback.
+All **200 logs** were audited: **zero failed reruns**, **14,500 passing
+assertions** (73 per macOS repeat, 72 per Linux repeat), one worker per matrix.
+No retries, omitted failures, relaxed budgets, or new memory exceptions were
+used. The existing Node 26 idle-RSS exception remains explicit; only macOS
+Node 26 used it in this run.
+
+All six performance reports and four stability summaries identify production
+artifact `48d7421fedf638cee320204bace453d9998e9d52d891c0c3eb1666ad20bb3326`.
+The source/test/dependency stability fingerprint is
+`3c65b9df70ac676bd0ab651f4a99365ad9a784055809adf27dfef23147aea2b9`.
+macOS 15 Node 22 hello p50/p95 is **36.10/42.20ms**, warm first-token
+**61.18/69.96ms**, maximum idle RSS **47.59MiB**, and slowest burst **10,187
+deltas/s**. Original <60ms/<100ms timing and 60,000,000-byte memory budgets pass.
+Linux Node 22 hello is **37.59/40.86ms**, first-token **54.92/58.38ms**.
+
+[Reviewed report/log hashes and provenance](spikes/CI-37733087814.json) retain
+all matrix summaries and hashes of the twelve original startup/performance
+reports and 200 logs. Raw reports retain every sample in the public CI artifacts;
+local copies are `build/ci-d2de470-{startup,performance,stability-final}/`.
+The S8 socket-loader comparison is not production or natural-provider latency.
+
+After this exact head was green, authorized main protection was configured and
+read back: strict **`M3 required checks`**, bound to GitHub Actions app 15368,
+including administrators; force pushes and deletion blocked. No review count
+or publishing policy was added. Future changes use PRs. This validates the
+specified code/artifact, not later changes, a final release, human doctor/
+walkthrough/three-day acceptance, or publishing approval. The package remains
+private `0.0.0`; no release tag, publication, deployment, or remote model request
+occurred in this CI collection.
+
+The intermediate [run 37728405897](https://github.com/MiraiForge/prefaix/actions/runs/37728405897)
+at `a2935e6` passed every required matrix and all 200 stability reruns, but the
+optional smoke failed during npm installation: the retired
+`@mariozechner/pi-coding-agent@0.87.1` pin was unavailable (ETARGET). The final
+commit pins the official current `@earendil-works/pi-coding-agent@1.0.4` with
+`--ignore-scripts` and updates doctor guidance without changing its supported-
+version floor. A fresh full matrix, not a retry or skipped optional job, proves
+the correction. The original failed run and logs remain retained.
+
 ## CI and native dialog follow-up: 2026-10-08
 
-Latest-main [CI run 37719207492](https://github.com/MiraiForge/prefaix/actions/runs/37719207492)
+Historical pre-delivery candidate record; superseded for CI/protection status
+by the exact-head evidence above, not erased as measurement or regression proof.
+
+Earlier [CI run 37719207492](https://github.com/MiraiForge/prefaix/actions/runs/37719207492)
 failed at `e2aaa27`. Ubuntu Node 22 coverage let the busy fake turn finish
 before Ctrl+C (exit 0 instead of 130). macOS 15 Node 22 reported hello p50
 **67.87ms** and first-token p50 **115.80ms**, exceeding the unchanged <60ms and
@@ -74,8 +127,10 @@ These local sweeps are not frozen release-artifact acceptance across the full
 supported OS/version matrix. The recorder uses local Bun 1.4.2 rather than
 CI's pinned 1.3.14; native and performance runtime scopes remain explicit.
 
-`main` remains unprotected: a fresh read-only branch-protection query returns
-404 and the repository ruleset list is empty. No commit/push, remote policy
+At this pre-delivery collection point, `main` was unprotected: a read-only
+branch-protection query returned 404 and the repository ruleset list was empty.
+The later approved exact-head CI and protection evidence above supersedes
+this status. No commit/push, remote policy
 change, tag, publishing, deployment, or paid recording is implied by this local
 work. Fresh exact-commit CI, required-check enforcement, frozen release-artifact
 stability across all supported OS/version entries, human doctor/walkthrough/
