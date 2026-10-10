@@ -148,7 +148,7 @@ that basis.
 - Allan has used it daily for 3 days on at least two shells, with no tty corruption and no lost typeahead.
 
 M3 feature implementation and its automated gates are present; acceptance is
-still in progress. Allan approved a Node 26 idle-memory exception. Historical
+still in progress. Allan approved a Node 26 idle-memory exception.
 Exact-head macOS/Linux CI at `d2de470` now passes all 18 jobs, including four frozen
 50/50 native stability gates (200 reruns, zero failures), with the busy-turn
 fixture and macOS Node 22 budgets corrected. Strict `M3 required checks` are

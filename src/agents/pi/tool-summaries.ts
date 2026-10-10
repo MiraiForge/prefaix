@@ -15,7 +15,7 @@ export function asText(value: unknown): string {
 const LONE_SURROGATE =
   /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 // eslint-disable-next-line no-control-regex -- control bytes must not reach the wire
-const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+const CONTROL = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g;
 
 export function sanitize(text: string): string {
   return text.replaceAll(LONE_SURROGATE, "�").replaceAll(CONTROL, " ");

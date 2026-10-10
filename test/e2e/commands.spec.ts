@@ -56,9 +56,7 @@ async function start(shellKind = kind, proposal?: string) {
     PATH: `${shims}:${process.env["PATH"]}`,
     PREFAIX_BACKEND: "fake",
     COPY_TARGET: join(home, "clipboard"),
-    ...(proposal === undefined
-      ? {}
-      : { PREFAIX_FAKE_PROPOSAL: proposal.replaceAll("$HOME", home) }),
+    ...(proposal === undefined ? {} : { PREFAIX_FAKE_PROPOSAL: proposal }),
   };
   const paths = resolvePaths({ home, env });
   mkdirSync(join(home, "config", "prefaix"), { recursive: true });
@@ -106,24 +104,25 @@ describe.each(TEST_SHELLS)(
     it("keeps the proposed command editable, cancellable, and unexecuted until Enter", async () => {
       const s = await start(
         shellKind,
-        "printf '%s' '日本語🙂' > '$HOME/suggest-output'",
+        `printf '%s' '日本語🙂' > "$HOME/suggest-output"`,
       );
       const marker = join(home, "suggest-output");
-      // Reproduce the wrapped basename seen with macOS's longer temp paths.
-      s.resize(60, 30);
+      // HOME expands only after Enter; long platform temp paths aren't part of
+      // the editable buffer. Older fish paints wraps with explicit newlines.
+      s.resize(80, 30);
       s.sendLine(":s write a greeting");
       await s.waitFor("suggest-output", { unwrap: true });
       expect(existsSync(marker)).toBe(false);
       s.send("; false");
-      await s.waitFor(/suggest-output'\s*;\s*false/u, { unwrap: true });
+      await s.waitFor(/suggest-output"\s*;\s*false/u, { unwrap: true });
       expect(existsSync(marker)).toBe(false);
       s.press("ctrl-c");
       expect(await s.run("echo recovered")).toBe("recovered");
       expect(existsSync(marker)).toBe(false);
       s.sendLine(":suggest write a greeting");
-      await s.waitFor(/suggest-output'$/mu, { unwrap: true });
+      await s.waitFor(/suggest-output"$/mu, { unwrap: true });
       s.send("; true");
-      await s.waitFor(/suggest-output'\s*;\s*true/u, { unwrap: true });
+      await s.waitFor(/suggest-output"\s*;\s*true/u, { unwrap: true });
       expect(existsSync(marker)).toBe(false);
       const beforeEnter = s.promptRow();
       s.press("enter");

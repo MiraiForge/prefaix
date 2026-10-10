@@ -26,7 +26,12 @@ import {
   isToolUpdate,
   type PiRecord,
 } from "./types.js";
-import { toolEndSummary, toolPreview, toolSummary } from "./tool-summaries.js";
+import {
+  sanitize,
+  toolEndSummary,
+  toolPreview,
+  toolSummary,
+} from "./tool-summaries.js";
 import { parseCommandProposal } from "../../core/command-proposal.js";
 import { PROPOSE_COMMAND } from "./command-proposal.js";
 
@@ -64,6 +69,11 @@ function amount(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : undefined;
+}
+
+/** Model prose must be inert one-line display data, not terminal commands. */
+function proposalExplanation(text: string): string {
+  return sanitize(text).replaceAll(/\s+/gu, " ").trim();
 }
 
 interface ToolState {
@@ -269,11 +279,12 @@ export class TurnMapper {
         );
         if (proposal !== undefined) {
           out.push({ type: "set_buffer", text: proposal.command });
-          if (proposal.explanation !== "")
+          const explanation = proposalExplanation(proposal.explanation);
+          if (explanation !== "")
             out.push({
               type: "notice",
               level: "info",
-              text: proposal.explanation,
+              text: explanation,
             });
         }
       }

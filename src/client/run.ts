@@ -926,6 +926,7 @@ const HELP_LINES: readonly string[] = [
   "  :think <level>      set the thinking level",
   "  :info               what this conversation is doing",
   "  :copy               copy the last answer",
+  "  :suggest <want>     suggest a command (:s); editable, never auto-runs; Enter to execute",
   "  :ask <text>         use read-only tools to answer",
   "  :plan <task>        plan with read-only tools",
   "  :go                 execute the completed plan with normal tools",

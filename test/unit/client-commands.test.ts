@@ -130,6 +130,15 @@ afterEach(async () => {
 });
 
 describe("suggest command workflows", () => {
+  it("documents suggest and its alias in local help without starting a daemon", async () => {
+    expect(await invoke(":help")).toBe(0);
+    const help = output.join("");
+    expect(help).toContain(":suggest <want>");
+    expect(help).toContain(":s");
+    expect(help).toContain("editable");
+    expect(help).toContain("Enter");
+    expect(help).toContain("never auto-runs");
+  });
   it.each([":suggest find a file", ":s find a file", ": suggest find a file"])(
     "routes %s as a distinct edit operation",
     async (line) => {

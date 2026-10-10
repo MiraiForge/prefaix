@@ -187,6 +187,37 @@ const end = {
     details: { command: "echo x", explanation: "Review." },
   },
 };
+it.each([
+  ["\u001b[2J", "Review [2Jcommand"],
+  ["\u001b]52;c;payload\u0007", "Review ]52;c;payload command"],
+  ["\u009b2J", "Review 2Jcommand"],
+  ["\r\n\t\u2028\u2029", "Review command"],
+])(
+  "renders explanation controls %j as inert one-line text",
+  (controls, text) => {
+    const mapper = new TurnMapper({ commandProposals: true });
+    mapper.map(start);
+    const events = mapper.map({
+      ...end,
+      result: {
+        content: [{ type: "text", text: `Review${controls}command` }],
+        details: { command: "echo x", explanation: `Review${controls}command` },
+      },
+    });
+    expect(events).toContainEqual({ type: "set_buffer", text: "echo x" });
+    expect(events).toContainEqual({
+      type: "notice",
+      level: "info",
+      text,
+    });
+    for (const event of events) {
+      if (event.type === "notice" || event.type === "tool_end")
+        expect(JSON.stringify(event)).not.toMatch(
+          /\\u001b|\\u0007|\\r|\u009b/u,
+        );
+    }
+  },
+);
 it("maps only paired successful top-level proposal details, never arguments or editor UI", () => {
   const mapper = new TurnMapper({ commandProposals: true });
   expect(mapper.map(start).filter((e) => e.type === "set_buffer")).toEqual([]);
@@ -254,18 +285,21 @@ it.each([
     ).toEqual([]);
   },
 );
-it("does not produce an explanation notice for an empty explanation", () => {
-  const mapper = new TurnMapper({ commandProposals: true });
-  mapper.map(start);
-  expect(
-    mapper
-      .map({
-        ...end,
-        result: { details: { command: "echo x", explanation: "" } },
-      })
-      .filter((e) => e.type === "notice"),
-  ).toEqual([]);
-});
+it.each(["", " \r\n\u001b\u0007\u009b\u2028 "])(
+  "does not produce a notice for empty or control-only explanation %j",
+  (explanation) => {
+    const mapper = new TurnMapper({ commandProposals: true });
+    mapper.map(start);
+    expect(
+      mapper
+        .map({
+          ...end,
+          result: { details: { command: "echo x", explanation } },
+        })
+        .filter((e) => e.type === "notice"),
+    ).toEqual([]);
+  },
+);
 
 async function adapter(ready: "supported" | "legacy" | "malformed" | "absent") {
   const root = fileURLToPath(new URL("../../", import.meta.url));
