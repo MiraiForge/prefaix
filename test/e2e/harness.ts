@@ -365,8 +365,19 @@ export class ShellSession {
     return rows;
   }
 
-  screenText(): string {
-    return this.screen().join("\n").trimEnd();
+  /** Optionally join terminal soft wraps, never explicit output newlines. */
+  screenText(options: { unwrap?: boolean } = {}): string {
+    const buffer = this.#terminal.buffer.active;
+    let text = "";
+    for (const [row, line] of this.screen().entries()) {
+      if (
+        row > 0 &&
+        !(options.unwrap && buffer.getLine(buffer.baseY + row)?.isWrapped)
+      )
+        text += "\n";
+      text += line;
+    }
+    return text.trimEnd();
   }
 
   /** Everything the shell has written, including what scrolled off. */
@@ -409,13 +420,13 @@ export class ShellSession {
 
   async waitFor(
     needle: string | RegExp,
-    options: { timeoutMs?: number } = {},
+    options: { timeoutMs?: number; unwrap?: boolean } = {},
   ): Promise<void> {
     await this.#waitFor(
       () =>
         typeof needle === "string"
-          ? this.screenText().includes(needle)
-          : needle.test(this.screenText()),
+          ? this.screenText(options).includes(needle)
+          : needle.test(this.screenText(options)),
       String(needle),
       options,
     );

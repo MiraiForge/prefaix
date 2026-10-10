@@ -109,19 +109,21 @@ describe.each(TEST_SHELLS)(
         "printf '%s' '日本語🙂' > '$HOME/suggest-output'",
       );
       const marker = join(home, "suggest-output");
+      // Reproduce the wrapped basename seen with macOS's longer temp paths.
+      s.resize(60, 30);
       s.sendLine(":s write a greeting");
-      await s.waitFor("suggest-output");
+      await s.waitFor("suggest-output", { unwrap: true });
       expect(existsSync(marker)).toBe(false);
       s.send("; false");
-      await s.waitFor(/suggest-output'\s*;\s*false/u);
+      await s.waitFor(/suggest-output'\s*;\s*false/u, { unwrap: true });
       expect(existsSync(marker)).toBe(false);
       s.press("ctrl-c");
       expect(await s.run("echo recovered")).toBe("recovered");
       expect(existsSync(marker)).toBe(false);
       s.sendLine(":suggest write a greeting");
-      await s.waitFor(/suggest-output'$/mu);
+      await s.waitFor(/suggest-output'$/mu, { unwrap: true });
       s.send("; true");
-      await s.waitFor(/suggest-output'\s*;\s*true/u);
+      await s.waitFor(/suggest-output'\s*;\s*true/u, { unwrap: true });
       expect(existsSync(marker)).toBe(false);
       const beforeEnter = s.promptRow();
       s.press("enter");
