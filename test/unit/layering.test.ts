@@ -6,6 +6,17 @@ import { beforeAll, describe, expect, it } from "vitest";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const eslint = new ESLint({ cwd: root });
 
+it("ignores generated build artifacts without excluding production or test code", async () => {
+  expect(
+    await eslint.isPathIgnored(
+      "build/toolchains/fish/share/web_config/main.js",
+    ),
+  ).toBe(true);
+  expect(await eslint.isPathIgnored("build/reviews/audit.mjs")).toBe(true);
+  expect(await eslint.isPathIgnored("src/context/staged-diff.ts")).toBe(false);
+  expect(await eslint.isPathIgnored("test/unit/commit.test.ts")).toBe(false);
+});
+
 describe("architecture import boundaries", () => {
   beforeAll(async () => {
     // Load the TypeScript parser and project rules before timing individual cases.
