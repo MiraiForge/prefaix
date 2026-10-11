@@ -148,7 +148,7 @@ that basis.
 - Allan has used it daily for 3 days on at least two shells, with no tty corruption and no lost typeahead.
 
 M3 feature implementation and its automated gates are present; acceptance is
-still in progress. Allan approved a Node 26 idle-memory exception. Historical
+still in progress. Allan approved a Node 26 idle-memory exception.
 Exact-head macOS/Linux CI at `d2de470` now passes all 18 jobs, including four frozen
 50/50 native stability gates (200 reruns, zero failures), with the busy-turn
 fixture and macOS Node 22 budgets corrected. Strict `M3 required checks` are
@@ -181,6 +181,16 @@ private and no release is implied by this implementation.
 
 ---
 
+**M4-1 candidate (2026-10-09):** `:suggest`/`:s`, structured non-executing
+proposal tooling, dedicated-model restoration, and safe final buffer routing
+are implemented locally. Scenario 10 passes on installed zsh/fish/bash: the
+command stays editable, cancellation leaves no sentinel, and only explicit
+Enter executes it. Controlled native pi 1.0.4 and 1.1.0 loopback probes each
+verify one proposal-only request, termination without an automatic follow-up,
+and restoration on the same child. [Evidence](spikes/M4-suggest.md). Supported
+platform CI for this new slice, review, and merge remain separate from the
+already validated protected-main artifact and the M3 human/release gate.
+
 **M4-5 state (2026-10-08):** built-in/custom persona commands, persistent
 selection, and `:plan` → `:go` are implemented and review-hardened. Native pi 1.0.4 against an
 isolated loopback API verifies tool schemas, transcript tool deltas, normal-tool
@@ -193,9 +203,9 @@ verification](spikes/native-dialogs.md) now covers deadlines, signal/method abor
 and silent preflight timeout without orphaned requests. Safe abort terminates
 the owned child and resumes its native conversation on a replacement. This is
 not graceful native hook cancellation or a waiver of the M3 release gate.
-The automated M3 CI dependency is now satisfied, so the remaining M4 groups
-are ready for implementation, not completed. Human/release acceptance stays
-separate.
+The automated M3 CI dependency is now satisfied. Remaining M4 groups retain
+their individual roadmap dependencies and are not completed; M3 human/release
+acceptance stays separate.
 
 ## M5 — Hardening → 1.0 (ongoing)
 

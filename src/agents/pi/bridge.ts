@@ -6,12 +6,18 @@
 // stays byte-for-byte what the user typed, which is what makes a later `:tui`
 // handoff into pi's own TUI read correctly.
 //
-// Everything here is best effort. An extension that throws becomes an
-// `extension_error` on the wire and a noisy turn, so a failure is reported by
-// staying silent: the adapter notices a missing ready file and falls back to
-// prepending the same text to the prompt.
+// Ordinary context augmentation is best effort: missing readiness permits
+// prepend fallback. Structured edits instead negotiate tool readiness and fail
+// closed; tool-call guards stay armed even when pi reports a preflight error.
+// This extension is a convenience boundary, not a sandbox for other extensions.
 
 import { appendFileSync, writeFileSync } from "node:fs";
+import { suggestGuideline } from "../../core/command-proposal.js";
+import {
+  PROPOSE_COMMAND,
+  proposalTool,
+  type ProposalTool,
+} from "./command-proposal.js";
 import {
   BRIDGE_VERSION,
   bridgeAppliedLog,
@@ -35,16 +41,19 @@ export const BRIDGE_DIR_ENV = "PREFAIX_BRIDGE_DIR";
 interface BridgePi {
   on(
     event: string,
-    handler: (event: BridgeEvent) => void | Promise<void>,
+    handler: (event: BridgeEvent) => unknown | Promise<unknown>,
   ): void;
   setActiveTools(tools: string[]): void;
   getActiveTools?(): string[];
+  registerTool?(tool: ProposalTool): void;
 }
 
 interface BridgeEvent {
   type: string;
   /** The raw user prompt text, after expansion. */
   prompt?: string;
+  toolName?: string;
+  toolCallId?: string;
   systemPromptOptions?: {
     sections: Record<string, string>;
   };
@@ -60,11 +69,11 @@ function bridgeDir(): string | undefined {
  * trusting a turn context file, because an extension that failed to load would
  * leave context files unread and every turn silently context-free.
  */
-function announce(dir: string, pid: number): void {
+function announce(dir: string, pid: number, commandProposals: boolean): void {
   try {
     writeFileSync(
       bridgeReadyFile(dir, pid),
-      `${JSON.stringify({ version: BRIDGE_VERSION, pid })}\n`,
+      `${JSON.stringify({ version: BRIDGE_VERSION, pid, ...(commandProposals ? { commandProposals: true } : {}) })}\n`,
       { mode: 0o600 },
     );
   } catch {
@@ -99,11 +108,22 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
   let appliedTools: string[] | undefined;
   let appliedPersona: string | undefined;
 
-  if (dir !== undefined) {
-    announce(dir, pid);
-  }
+  let proposing = false;
+  let proposalRegistered = false;
+  let editPreviousTools: string[] | undefined;
   try {
-    defaultTools = pi.getActiveTools?.() ?? [];
+    if (pi.registerTool !== undefined) {
+      pi.registerTool(proposalTool(() => proposing));
+      proposalRegistered = true;
+    }
+  } catch {
+    // The ready file must not claim structured edits if registration failed.
+  }
+  if (dir !== undefined) announce(dir, pid, proposalRegistered);
+  try {
+    defaultTools = (pi.getActiveTools?.() ?? []).filter(
+      (name) => name !== PROPOSE_COMMAND,
+    );
   } catch {
     defaultTools = [];
   }
@@ -112,10 +132,34 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
   // there; session_start is the first reliable runtime baseline (S9).
   pi.on("session_start", () => {
     try {
-      defaultTools = pi.getActiveTools?.() ?? defaultTools ?? [];
+      const active = pi.getActiveTools?.() ?? defaultTools ?? [];
+      defaultTools = active.filter((name) => name !== PROPOSE_COMMAND);
+      if (active.includes(PROPOSE_COMMAND))
+        pi.setActiveTools([...defaultTools]);
     } catch {
       // Keep the best-effort load-time baseline if this API is unavailable.
     }
+  });
+
+  const restoreEdit = () => {
+    proposing = false;
+    if (editPreviousTools !== undefined) {
+      pi.setActiveTools(editPreviousTools);
+      editPreviousTools = undefined;
+    }
+  };
+  pi.on("agent_settled", restoreEdit);
+  pi.on("tool_call", (event) => {
+    if (
+      (proposing && event.toolName !== PROPOSE_COMMAND) ||
+      (event.toolName === PROPOSE_COMMAND &&
+        (!proposing || event.toolCallId?.includes("/")))
+    )
+      return {
+        block: true,
+        reason: "This tool is not available in this edit turn.",
+      };
+    return undefined;
   });
 
   pi.on("before_agent_start", (event: BridgeEvent) => {
@@ -132,6 +176,13 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
       return;
     }
 
+    // Restoration can throw and pi continues after hook failures. Arm the
+    // edit tool-call guard even in that case; never fall through to full tools.
+    try {
+      restoreEdit();
+    } finally {
+      proposing = payload.commandProposal === true;
+    }
     const options_ = event.systemPromptOptions;
     if (options_ === undefined) {
       // pi did not hand over a mutable prompt, so there is nothing to patch.
@@ -140,7 +191,22 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
     options_.sections["prefaix"] = renderShellContext(payload.context);
 
     const persona = payload.persona;
-    if (persona !== undefined) {
+    delete options_.sections["suggest"];
+    if (proposing) {
+      if (!proposalRegistered)
+        throw new Error("structured command proposals are unavailable");
+      editPreviousTools = [...(pi.getActiveTools?.() ?? defaultTools ?? [])];
+      pi.setActiveTools([PROPOSE_COMMAND]);
+      if (
+        pi.getActiveTools !== undefined &&
+        !sameTools(pi.getActiveTools(), [PROPOSE_COMMAND])
+      )
+        throw new Error("could not activate propose_command exclusively");
+      delete options_.sections["persona"];
+      options_.sections["suggest"] = suggestGuideline(
+        payload.context.shell.kind,
+      );
+    } else if (persona !== undefined) {
       const guideline = renderPersonaSection(persona);
       if (guideline !== undefined) {
         options_.sections["persona"] = guideline;

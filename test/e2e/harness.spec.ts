@@ -152,6 +152,21 @@ describe("pty harness", () => {
   );
 
   it.each(usable)(
+    "matches %s soft wraps without collapsing hard line breaks",
+    async (shell) => {
+      const s = await ShellSession.start({ shell, cols: 20 });
+      open.push(s);
+      await s.run("printf '%s\\n' 'abcdefghijklmnopqrstuv' 'hard' 'break'");
+      expect(s.screenText()).not.toContain("abcdefghijklmnopqrstuv");
+      await s.waitFor("abcdefghijklmnopqrstuv", { unwrap: true });
+      expect(s.screenText({ unwrap: true })).toContain("hard\nbreak");
+      await expect(
+        s.waitFor("hardbreak", { unwrap: true, timeoutMs: 100 }),
+      ).rejects.toThrow("timed out waiting");
+    },
+  );
+
+  it.each(usable)(
     "separates %s multiline input echo from command output",
     async (shell) => {
       const s = await ShellSession.start({ shell, cols: 40 });

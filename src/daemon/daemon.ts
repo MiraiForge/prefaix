@@ -25,6 +25,7 @@ import type {
   ClientMessage,
   OperationName,
   TurnSummary,
+  TurnStartParams,
 } from "../core/protocol.js";
 
 export const DEFAULT_IDLE_MINUTES = 30;
@@ -262,6 +263,14 @@ export class Daemon {
     switch (op) {
       case "turn.start":
         return this.#ops.turnStart(params as never, connection);
+      case "turn.suggest":
+        return this.#ops.turnStart(
+          {
+            ...(params as TurnStartParams),
+            edit: "suggest",
+          },
+          connection,
+        );
       case "turn.abort":
         return this.#ops.turnAbort(params as never);
       case "turn.attach":

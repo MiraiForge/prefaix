@@ -20,6 +20,7 @@
     "spike:rpc-live": "bun scripts/spikes/rpc-live.ts",
     "spike:rpc-controlled": "bun scripts/spikes/rpc-controlled.ts",
     "spike:m1-native": "bun scripts/spikes/m1-native.ts",
+    "spike:suggest-native": "bun run build && bun scripts/spikes/suggest-native.ts",
     "spike:personas-native": "bun run build && bun scripts/spikes/personas-native.ts",
     "spike:dialogs-native": "bun run build && bun scripts/spikes/dialogs-native.ts",
     "test:flake": "bun run build && node scripts/flake.mjs",

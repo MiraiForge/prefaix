@@ -27,6 +27,7 @@ const minimalCapabilities: Capabilities = {
   uiDialogs: false,
   contextSections: false,
   personasWithoutRespawn: false,
+  commandProposals: false,
   handoffTui: false,
 };
 

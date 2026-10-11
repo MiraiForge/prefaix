@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -32,7 +33,7 @@ afterEach(async () => {
 // One installed shell is sufficient for command routing; shell-plugins.spec
 // covers the same interception and directive contract across all shell versions.
 const kind = TEST_SHELLS[0]!;
-async function start() {
+async function start(shellKind = kind, proposal?: string) {
   home = mkdtempSync(join(tmpdir(), "pfx-cmd-e2e-"));
   const shims = join(home, "bin");
   mkdirSync(shims);
@@ -55,6 +56,7 @@ async function start() {
     PATH: `${shims}:${process.env["PATH"]}`,
     PREFAIX_BACKEND: "fake",
     COPY_TARGET: join(home, "clipboard"),
+    ...(proposal === undefined ? {} : { PREFAIX_FAKE_PROPOSAL: proposal }),
   };
   const paths = resolvePaths({ home, env });
   mkdirSync(join(home, "config", "prefaix"), { recursive: true });
@@ -72,12 +74,18 @@ async function start() {
       audit: { tools: ["read"], guideline: "Audit dependencies." },
     },
   };
-  daemon = new Daemon({ paths, config, version: "0.0.0", checkOwner: false });
+  daemon = new Daemon({
+    paths,
+    config,
+    env,
+    version: "0.0.0",
+    checkOwner: false,
+  });
   await daemon.start();
   shell = await ShellSession.start({
-    shell: kind,
+    shell: shellKind,
     env,
-    initScript: initShell(kind, { paths, config }),
+    initScript: initShell(shellKind, { paths, config }),
     timeoutMs: 20000,
   });
   return shell;
@@ -89,6 +97,41 @@ async function command(s: ShellSession, line: string): Promise<string> {
   await s.waitForPrompt({ afterRow: row });
   return s.screenText();
 }
+
+describe.each(TEST_SHELLS)(
+  "%s suggest edits with the installed client",
+  (shellKind) => {
+    it("keeps the proposed command editable, cancellable, and unexecuted until Enter", async () => {
+      const s = await start(
+        shellKind,
+        `printf '%s' '日本語🙂' > "$HOME/suggest-output"`,
+      );
+      const marker = join(home, "suggest-output");
+      // HOME expands only after Enter; long platform temp paths aren't part of
+      // the editable buffer. Older fish paints wraps with explicit newlines.
+      s.resize(80, 30);
+      s.sendLine(":s write a greeting");
+      await s.waitFor("suggest-output", { unwrap: true });
+      expect(existsSync(marker)).toBe(false);
+      s.send("; false");
+      await s.waitFor(/suggest-output"\s*;\s*false/u, { unwrap: true });
+      expect(existsSync(marker)).toBe(false);
+      s.press("ctrl-c");
+      expect(await s.run("echo recovered")).toBe("recovered");
+      expect(existsSync(marker)).toBe(false);
+      s.sendLine(":suggest write a greeting");
+      await s.waitFor(/suggest-output"$/mu, { unwrap: true });
+      s.send("; true");
+      await s.waitFor(/suggest-output"\s*;\s*true/u, { unwrap: true });
+      expect(existsSync(marker)).toBe(false);
+      const beforeEnter = s.promptRow();
+      s.press("enter");
+      await s.waitForPrompt({ afterRow: beforeEnter });
+      expect(readFileSync(marker, "utf8")).toBe("日本語🙂");
+      expect(await s.run("echo alive")).toBe("alive");
+    });
+  },
+);
 
 describe(`${kind} commands with the installed client and fake backend`, () => {
   it("continues turns, starts new conversations, switches and toggles, and renders info/status", async () => {
