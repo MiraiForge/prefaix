@@ -42,7 +42,7 @@ export interface TurnStartParams {
   /** Execute a completed plan in this exact conversation, with normal tools. */
   executePlan?: boolean;
   /** Structured edit output, held until this turn successfully finishes. */
-  edit?: "suggest";
+  edit?: "suggest" | "commit";
   context: TurnContextPayload;
   onDisconnect?: "abort" | "continue";
 }
@@ -69,6 +69,8 @@ export interface TurnSummary {
   turnId: string;
   status: "stop" | "aborted" | "error" | "length";
   error?: string;
+  /** Index snapshot used to draft a commit; checked again by explicit --run. */
+  stagedDiffHash?: string;
   usage?: {
     input: number;
     output: number;
@@ -187,6 +189,7 @@ export interface Operations {
   "turn.start": { params: TurnStartParams; result: TurnStartResult };
   /** Separate operation: old daemons must never treat an edit as a run turn. */
   "turn.suggest": { params: TurnStartParams; result: TurnStartResult };
+  "turn.commit": { params: TurnStartParams; result: TurnStartResult };
   "turn.abort": { params: TurnAbortParams; result: { turnId: string } };
   "ui.respond": { params: UiRespondParams; result: { ok: true } };
   "turn.attach": {
@@ -247,6 +250,7 @@ export type OperationName = keyof Operations;
 export const OPERATION_NAMES: readonly OperationName[] = [
   "turn.start",
   "turn.suggest",
+  "turn.commit",
   "turn.abort",
   "ui.respond",
   "turn.attach",

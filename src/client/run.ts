@@ -48,6 +48,7 @@ import type {
 import type { PickItem } from "./picker.js";
 import { copyText } from "./clipboard.js";
 import { plain } from "./process.js";
+import { commitMessage, parseCommitArgs } from "../core/commit-proposal.js";
 import {
   cacheCommands,
   cachedCommands,
@@ -299,6 +300,8 @@ export async function run(options: RunOptions): Promise<ExitCode> {
   let releaseGuards: (() => void) | undefined;
   let editBuffer: string | undefined;
   let editController: AbortController | undefined;
+  let directCommit = false;
+  let stagedDiffHash: string | undefined;
 
   try {
     await client.connect();
@@ -306,7 +309,7 @@ export async function run(options: RunOptions): Promise<ExitCode> {
     let text: string | undefined;
     let persona: string | undefined;
     let executePlan: boolean | undefined;
-    let edit: "suggest" | undefined;
+    let edit: "suggest" | "commit" | undefined;
     let conversationId = args.conversationId;
     exit = EXIT.ok;
     if (parsed.kind === "command") {
@@ -326,6 +329,7 @@ export async function run(options: RunOptions): Promise<ExitCode> {
       text = result.text;
       executePlan = result.executePlan;
       edit = result.edit;
+      directCommit = result.directCommit ?? false;
     } else if (parsed.kind === "agent") {
       text = `/${parsed.name} ${parsed.args}`.trim();
     } else {
@@ -372,6 +376,7 @@ export async function run(options: RunOptions): Promise<ExitCode> {
       exit = result.exit;
       conversationId = result.conversationId;
       editBuffer = result.buffer;
+      stagedDiffHash = result.stagedDiffHash;
     }
     if (conversationId !== "") {
       directives.conversation = conversationId;
@@ -414,8 +419,29 @@ export async function run(options: RunOptions): Promise<ExitCode> {
       exit = EXIT.aborted;
       directives.status = "prefaix · aborted";
     }
-    if (exit === EXIT.ok && editBuffer !== undefined)
-      renderer.handle({ type: "set_buffer", text: editBuffer });
+    if (exit === EXIT.ok && editBuffer !== undefined) {
+      if (directCommit) {
+        try {
+          await executeCommit(
+            editBuffer,
+            stagedDiffHash,
+            args,
+            filterEnv(env, config.env),
+            editController!.signal,
+            err,
+          );
+        } catch (cause) {
+          exit = editController?.signal.aborted
+            ? EXIT.aborted
+            : cause instanceof PrefaixError
+              ? cause.exitCode
+              : EXIT.agentError;
+          directives.status =
+            exit === EXIT.aborted ? "prefaix · aborted" : "prefaix · error";
+          err(`${messageOf(cause)}\n`);
+        }
+      } else renderer.handle({ type: "set_buffer", text: editBuffer });
+    }
     // Prompt hooks refresh from this file after applying the directives. The
     // foreground owns the final rich status once the daemon ends the turn.
     if (directives.status !== undefined) {
@@ -431,6 +457,24 @@ export async function run(options: RunOptions): Promise<ExitCode> {
 
   await writeDirectives(args.directives, directives);
   return exit;
+}
+
+async function executeCommit(
+  buffer: string,
+  hash: string | undefined,
+  args: RunArgs,
+  env: Record<string, string>,
+  signal: AbortSignal,
+  err: (text: string) => void,
+): Promise<void> {
+  const message = commitMessage(buffer, args.shell);
+  if (message === undefined || hash === undefined)
+    throw new PrefaixError(
+      "AGENT_ERROR",
+      "the commit proposal has no valid message or index snapshot",
+    );
+  const { runCommit } = await import("../context/staged-diff.js");
+  await runCommit(args.cwd, env, message, hash, signal, err);
 }
 
 function footerFields(config: PrefaixConfig): FooterField[] {
@@ -493,7 +537,7 @@ interface TurnOptions {
   readonly text: string;
   readonly persona?: string;
   readonly executePlan?: boolean;
-  readonly edit?: "suggest";
+  readonly edit?: "suggest" | "commit";
   readonly controller: AbortController;
   readonly setTurnId: (turnId: string) => void;
   readonly setConversationId: (conversationId: string) => void;
@@ -503,6 +547,7 @@ interface TurnRun {
   readonly exit: ExitCode;
   readonly conversationId: string;
   readonly buffer?: string;
+  readonly stagedDiffHash?: string;
 }
 
 async function runTurn(options: TurnOptions): Promise<TurnRun> {
@@ -540,7 +585,11 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
   });
 
   const started = await client.call<{ turnId: string; conversationId: string }>(
-    options.edit === undefined ? "turn.start" : "turn.suggest",
+    options.edit === undefined
+      ? "turn.start"
+      : options.edit === "commit"
+        ? "turn.commit"
+        : "turn.suggest",
     {
       ...(args.conversationId === ""
         ? {}
@@ -584,7 +633,12 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
       ...(options.edit !== undefined &&
       summary.status === "stop" &&
       summary.buffer !== undefined
-        ? { buffer: summary.buffer }
+        ? {
+            buffer: summary.buffer,
+            ...(summary.stagedDiffHash === undefined
+              ? {}
+              : { stagedDiffHash: summary.stagedDiffHash }),
+          }
         : {}),
     };
   } finally {
@@ -610,7 +664,8 @@ interface CommandResult {
   conversationId?: string;
   text?: string;
   executePlan?: boolean;
-  edit?: "suggest";
+  edit?: "suggest" | "commit";
+  directCommit?: boolean;
 }
 
 function shellInfo(args: RunArgs) {
@@ -702,6 +757,10 @@ async function runCommand(
           hint: "Use :suggest <what the command should do>.",
         });
       return { exit: EXIT.ok, text: parsed.args, edit: "suggest" };
+    case "commit": {
+      const { hint, run } = parseCommitArgs(parsed.args);
+      return { exit: EXIT.ok, text: hint, edit: "commit", directCommit: run };
+    }
     case "go":
       if (args.conversationId === "")
         throw new PrefaixError(
@@ -927,6 +986,7 @@ const HELP_LINES: readonly string[] = [
   "  :info               what this conversation is doing",
   "  :copy               copy the last answer",
   "  :suggest <want>     suggest a command (:s); editable, never auto-runs; Enter to execute",
+  "  :commit [hint]      draft staged changes into the buffer; --run commits directly",
   "  :ask <text>         use read-only tools to answer",
   "  :plan <task>        plan with read-only tools",
   "  :go                 execute the completed plan with normal tools",

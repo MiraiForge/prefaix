@@ -271,6 +271,11 @@ export class Daemon {
           },
           connection,
         );
+      case "turn.commit":
+        return this.#ops.turnStart(
+          { ...(params as TurnStartParams), edit: "commit" },
+          connection,
+        );
       case "turn.abort":
         return this.#ops.turnAbort(params as never);
       case "turn.attach":

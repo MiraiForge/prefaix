@@ -273,6 +273,7 @@ export class PiSession implements AgentSession {
     const mapper = new TurnMapper({
       ...this.#mapperOptions,
       commandProposals: input.commandProposal === true,
+      commitProposals: input.commitStyle !== undefined,
     });
     this.#mapper = mapper;
     let iterator: AsyncIterator<PiRecord> | undefined;
@@ -394,8 +395,11 @@ export class PiSession implements AgentSession {
         try {
           const ready = JSON.parse(
             readFileSync(bridgeReadyFile(this.#turnsDir, this.#pid), "utf8"),
-          ) as { commandProposals?: unknown };
-          supported = ready.commandProposals === true;
+          ) as { commandProposals?: unknown; commitProposals?: unknown };
+          supported =
+            input.commitStyle === undefined
+              ? ready.commandProposals === true
+              : ready.commitProposals === true;
         } catch {
           /* Malformed/legacy readiness is not structured-edit support. */
         }
@@ -411,7 +415,7 @@ export class PiSession implements AgentSession {
       // Prevent a slash-prefixed request from dispatching a native extension
       // command instead of the guarded edit turn.
       return input.commandProposal === true
-        ? `Request for a suggested shell command:\n${input.text}`
+        ? `Request for a ${input.commitStyle === undefined ? "suggested shell command" : "commit message"}:\n${input.text}`
         : input.text;
     }
     if (this.#bridgeLive) {
@@ -440,6 +444,9 @@ export class PiSession implements AgentSession {
       version: BRIDGE_VERSION,
       context: input.context,
       ...(input.commandProposal === true ? { commandProposal: true } : {}),
+      ...(input.commitStyle === undefined
+        ? {}
+        : { commitStyle: input.commitStyle }),
       ...(input.persona === undefined && this.#persona === undefined
         ? {}
         : { persona: input.persona ?? (this.#persona as PersonaSpec) }),

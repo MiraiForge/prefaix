@@ -377,7 +377,7 @@ Newline-delimited JSON over the unix socket. Framing splits on `\n` only (not `r
 
 | Area | Ops |
 |---|---|
-| Turns | `turn.start`, `turn.suggest` (M4 edit), `turn.abort`, `turn.steer` (M4), `turn.attach {turnId?, fromSeq}` (M4), `ui.respond` |
+| Turns | `turn.start`, `turn.suggest` / `turn.commit` (M4 edit), `turn.abort`, `turn.steer` (M4), `turn.attach {turnId?, fromSeq}` (M4), `ui.respond` |
 | Conversations | `conv.new`, `conv.list`, `conv.get`, `conv.rename`, `conv.lastText`, `conv.compact` |
 | Model and commands | `model.list`, `model.set`, `thinking.set`, `commands.list` |
 | Status and daemon | `status.get`, `daemon.ping`, `daemon.stop` |
@@ -628,10 +628,23 @@ A tiny pi extension, loaded with `-e`, that makes pi prefaix-aware without touch
 - **Personas without respawn.** On a persona change it calls `pi.setActiveTools([...])` and patches a `persona` section. `:ask` means `read, grep, find, ls` plus the "answer, don't modify" guideline. [S9](spikes/S9-pi-bridge-extension.md) verifies native schema changes and restoration; capture the baseline at `session_start`, after runtime binding, not at extension load.
 - **Restoration.** Leaving a persona (`:go`) or switching to a guideline-only persona restores the runtime baseline, including user extension tools. The daemon persists persona selection and a completed-plan marker. It resolves retained persona/native state under turn ownership and invalidates the old marker before fallible backend acquisition; `:go` checks the current marker, never infers a plan from an older cached answer. [M4 native evidence](spikes/M4-personas.md) verifies actual tool schemas and transcript deltas through the adapter/pool.
 - **Pre-ack UI.** Native extensions can request a dialog before prompt acknowledgment or `agent_start`. Consume events concurrently with acknowledgment, forwarding normalized UI without teaching the foreground pi schemas. S9 includes reviewed native UI replay; [separate pi 1.0.4 native hardening](spikes/native-dialogs.md) verifies long-held questions, safe abort, and recovery. An unanswered-dialog abort terminates the owned child and resumes its native conversation on a replacement; it does not claim RPC `abort` releases the extension's pending hook.
-- **`propose_command` tool (M4).** `:suggest` activates this model-only tool exclusively; `:commit` integration remains planned. The model supplies `{command, explanation}`. A valid execution returns structured details with `terminate: true`; only paired successful top-level tool completions map those details to `set_buffer`, never arguments from a failed call or model prose. The daemon holds the edit buffer until successful settlement, selection restoration, persistence, and finalization; the foreground accepts it only from the successful final summary. The bridge restores prior tools and blocks non-proposal edit calls, but this is not an extension sandbox. [Controlled native evidence](spikes/M4-suggest.md) verifies tool schemas, termination, and transcript deltas.
+- **`propose_command` tool (M4).** `:suggest` activates this model-only tool exclusively. `:commit` instead activates `propose_commit`, whose `{message, explanation}` data is locally quoted into a canonical `git commit -m` buffer; it cannot propose arbitrary shell code. The model supplies `{command, explanation}`. A valid execution returns structured details with `terminate: true`; only paired successful top-level tool completions map those details to `set_buffer`, never arguments from a failed call or model prose. The daemon holds the edit buffer until successful settlement, selection restoration, persistence, and finalization; the foreground accepts it only from the successful final summary. The bridge restores prior tools and blocks non-proposal edit calls, but this is not an extension sandbox. [Controlled native evidence](spikes/M4-suggest.md) verifies tool schemas, termination, and transcript deltas.
 - **Fallback.** If the extension fails to load (the capability probe at spawn fails), context is prepended to the prompt text as a compact `<shell-context>` block and personas respawn with `--tools`. A persona-bearing spawn does not narrow tools before a configured bridge captures its baseline; if that bridge fails, restart once with spawn-time restrictions before sending any prompt. A warm child's unsupported switch likewise respawns on its native handle. If a live bridge instead loses per-turn context delivery, refuse the prompt and settle locally with an error; prose-only fallback cannot enforce tool restrictions or restoration.
 
-**Edit routing and model scope.** The foreground uses the distinct `turn.suggest` operation so an old daemon cannot interpret an edit request as an ordinary executing turn. The wire version remains 1 because existing operations are unchanged; old routers refuse the new operation without starting a turn. A configured `commands.suggest.model` temporarily replaces the backend model under turn ownership, then restores the original model/thinking before recording the outcome. Restore failure evicts the child and persists only the original selection. Suggest requests beginning with `/` are wrapped as literal requests rather than dispatched as native slash commands. Missing per-child bridge tool readiness refuses the prompt without a model request; there is no prompt-only fallback for edits.
+**Edit routing and model scope.** The foreground uses the distinct `turn.suggest` / `turn.commit` operations so an old daemon cannot interpret an edit request as an ordinary executing turn. The wire version remains 1 because existing operations are unchanged; old routers refuse the new operation without starting a turn. A configured `commands.suggest.model` temporarily replaces the backend model under turn ownership, then restores the original model/thinking before recording the outcome. Restore failure evicts the child and persists only the original selection. Suggest requests beginning with `/` are wrapped as literal requests rather than dispatched as native slash commands. Missing per-child bridge tool readiness refuses the prompt without a model request; there is no prompt-only fallback for edits.
+
+**Commit drafting.** `turn.commit` captures the staged diff in the invoking cwd
+with external diff/textconv disabled, retains at most `commands.commit.max_diff_bytes`,
+and warns on truncation. Empty stages fail without prompting. The configured
+`commands.commit.style` is delivered as commit-only system guidance. Per-child
+`commitProposals` readiness is required, with no prose-only fallback. Only one
+canonical quoted commit proposal can reach the final buffer. Explicit `--run`
+executes `git commit -m <message>` as argv in the foreground after daemon/client
+finalization, never through a shell. A full-diff hash check refuses a changed
+stage before execution; it is not an atomic index lock and does not control Git
+hooks. Failed drafts, cancellation, persistence/metadata failures, or failed Git
+commands never leave an automatically executed retry. Staged diffs are model
+input, not redacted shell-history context.
 
 #### 4.5.5 Commands to pi RPC
 
@@ -730,6 +743,7 @@ guideline = "Produce a numbered plan. Do not modify files."
 # model = "google/gemini-3.8-flash"   # fast/cheap model for :suggest
 [commands.commit]
 max_diff_bytes = 100000
+style = "Short imperative subject; explain non-obvious rationale in the body."
 ```
 
 Environment overrides use the key path, for example `PREFAIX_AGENT_PI_BIN`, `PREFAIX_UI_THINKING`, and `PREFAIX_PLAIN=1`. `prefaix config check` validates the file with precise errors.

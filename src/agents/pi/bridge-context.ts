@@ -22,6 +22,7 @@ export interface TurnContextFile {
   readonly context: ShellContext;
   readonly persona?: PersonaSpec;
   readonly commandProposal?: boolean;
+  readonly commitStyle?: string;
 }
 
 export function turnContextFile(dir: string, pid: number): string {

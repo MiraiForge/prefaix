@@ -20,7 +20,7 @@ but **0.1.0 has not shipped**.
 | **M1 — Design spikes** | Complete for measured decisions | S1 lifecycle; S2 pool economics; S3 safe cwd policy; S4–S7 shell/addon/tty mechanics; S8 macOS/Linux startup; S9 bridge/tools/UI. Eleven reviewed native pi fixtures. | Broader terminal/addon versions; the separate controlled native dialog hardening is now verified on pi 1.0.4, not merely inferred from replay. |
 | **M2 — Core** | Complete | Backend-independent AgentPort, fake and pi adapters, bridge, daemon/pool/store, foreground client, safe directives, renderer, CLI, and contracts; cumulative usage/cache-cost accounting, verified live provider/model selection, and resume/bridge/UI fixes. | Ongoing hardening and wider compatibility. Long-held pi 1.0.4 dialogs now use paused acceptance deadlines and safe child replacement on abort. |
 | **M3 — Triple-shell MVP → 0.1.0** | Implemented; acceptance in progress | zsh/fish/bash plugins, bash 3.2 fallback, MVP commands, pickers, prompt status, doctor, setup/uninstall, docs, and green exact-head macOS/Linux CI at `d2de470`, including four 50/50 stability gates and enforced main checks. | Keep the eventual release artifact green; human walkthrough/daily-use checks, release preparation, and explicit publishing approval. |
-| **M4 — Parity and beyond Forge** | In progress | Built-in/custom personas and `:plan` → `:go`, with native tool/transcript verification. | Command suggestions and commit drafting, detach/attach, steering, completions, TUI handoff, additional conversation commands, richer context capture, and terminal polish. |
+| **M4 — Parity and beyond Forge** | In progress | Built-in/custom personas, `:plan` → `:go`, command suggestions, and staged commit drafting. | Detach/attach, steering, completions, TUI handoff, additional conversation commands, richer context capture, and terminal polish. |
 | **M5 — Hardening → 1.0** | Planned | Backend abstraction and safety checks to build on. | A second adapter and backend switching, security review, wider distribution/docs site, WSL/terminal validation, and conditional compiled-client/ble.sh work. |
 
 [S1](docs/spikes/S1-pi-rpc-lifecycle.md) combines real Kimi turns with native pi
@@ -174,7 +174,36 @@ command; an unknown tight name reports suggestions rather than prompting a model
 | Diagnose the installation | `:doctor` or `prefaix doctor` |
 | Run a pi command or skill | `:/command [args]`, e.g. `:/skill:review` |
 | Suggest a shell command without executing | `:suggest <want>`, `:s <want>`; review/edit the returned buffer, then press Enter |
-| Commit, detach/attach, TUI handoff | Planned for M4 |
+| Draft a commit from staged changes | `:commit [hint]`; review/edit the buffer, then press Enter; `:commit --run [hint]` commits directly |
+| Detach/attach, TUI handoff | Planned for M4 |
+
+## Commit drafting
+
+`:commit [hint]` reads **only the staged diff** in the invoking directory and
+returns an editable `git commit -m …` command. It does not stage files or commit
+unless you press Enter. An empty stage produces a clear error without a model
+request. The staged content is sent to your configured model; review sensitive
+changes before using this command. External diff drivers and text conversion
+are disabled.
+
+```toml
+[commands.commit]
+max_diff_bytes = 100000
+style = "Conventional Commits: type(scope): subject; optional explanatory body."
+```
+
+Diffs above the cap produce a truncation warning; the message may omit changes
+outside the retained prefix. The default style is a short imperative subject
+with non-obvious rationale in the body. The model proposes **message text**, not
+shell code; prefaix quotes it for zsh, fish, or bash.
+
+Use `:commit --run [hint]` only when you want to commit without reviewing the
+buffer. It executes Git with a literal message argument after successful draft
+finalization, and checks that the staged diff still matches the captured
+snapshot. If the stage changed, or Git/hooks fail, it reports the error and
+never retries automatically. This is a pre-execution check, not an index lock;
+concurrent staging after that check and changes made by Git hooks remain normal
+Git behavior. Use `:commit -- --run …` to treat `--run` as hint text.
 
 ## Command suggestions
 

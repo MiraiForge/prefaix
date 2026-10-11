@@ -191,6 +191,14 @@ and restoration on the same child. [Evidence](spikes/M4-suggest.md). Supported
 platform CI for this new slice, review, and merge remain separate from the
 already validated protected-main artifact and the M3 human/release gate.
 
+**M4-2 implementation:** `:commit [hint]` drafts a message from a byte-capped
+staged diff, with empty-stage errors, truncation warnings, and configurable
+`commands.commit.style`. Proposal-only tooling quotes the returned message into
+an editable, non-executing Git command. Explicit `--run` executes argv only after
+successful finalization and a staged-diff snapshot check. Fake, scripted-adapter,
+and shell PTY tests validate this slice; native model evidence and supported
+platform CI remain separate, as do all M3 human/release gates.
+
 **M4-5 state (2026-10-08):** built-in/custom persona commands, persistent
 selection, and `:plan` → `:go` are implemented and review-hardened. Native pi 1.0.4 against an
 isolated loopback API verifies tool schemas, transcript tool deltas, normal-tool

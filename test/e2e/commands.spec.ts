@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -9,10 +10,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultConfig } from "../../src/core/config/schema.js";
 import type { FakeSession } from "../../src/agents/fake/adapter.js";
 import { PLAN_EXECUTION_PROMPT } from "../../src/core/protocol.js";
+import { commitCommand } from "../../src/core/commit-proposal.js";
 import { resolvePaths } from "../../src/core/paths.js";
 import { Daemon } from "../../src/daemon/daemon.js";
 import { initShell } from "../../src/shells/plugins/index.js";
@@ -27,6 +29,7 @@ afterEach(async () => {
   shell = undefined;
   await daemon?.stop();
   daemon = undefined;
+  vi.restoreAllMocks();
   if (home) rmSync(home, { recursive: true, force: true });
 });
 
@@ -133,6 +136,73 @@ describe.each(TEST_SHELLS)(
   },
 );
 
+function repoGit(...args: string[]) {
+  return execFileSync("git", args, {
+    cwd: home,
+    env: {
+      HOME: home,
+      PATH: process.env.PATH!,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+    },
+    encoding: "utf8",
+  });
+}
+async function stagedRepo(s: ShellSession) {
+  repoGit("init", "--quiet");
+  repoGit("config", "user.email", "test@example.invalid");
+  repoGit("config", "user.name", "Test");
+  writeFileSync(join(home, "staged.txt"), "hello\n");
+  repoGit("add", "staged.txt");
+  await s.run(`cd -- '${home.replaceAll("'", "'\\''")}'`);
+}
+describe.each(TEST_SHELLS)("%s commit drafts", (shellKind) => {
+  it("keeps a quoted commit message editable and inert until explicit Enter", async () => {
+    const s = await start(shellKind);
+    await stagedRepo(s);
+    await command(s, ": hello");
+    const id = await s.readVariable("PREFAIX_CONVERSATION_ID");
+    const active = daemon!.pool.session(id) as FakeSession;
+    const message =
+      "fix: don't expand $(touch sentinel), `id`, $HOME or \\paths 日本語";
+    vi.spyOn(active, "prompt").mockImplementation(async function* () {
+      yield { type: "set_buffer", text: commitCommand(message, shellKind) };
+      yield { type: "settled", stopReason: "stop" };
+    });
+    s.sendLine(":commit literal message");
+    await s.waitFor("git commit -m", { unwrap: true });
+    expect(repoGit("diff", "--cached")).toContain("+hello");
+    expect(existsSync(join(home, "sentinel"))).toBe(false);
+    s.send("; false");
+    await s.waitFor(/日本語'\s*;\s*false/mu, { unwrap: true });
+    s.press("ctrl-c");
+    expect(await s.run("echo recovered")).toBe("recovered");
+    expect(repoGit("diff", "--cached")).toContain("+hello");
+    s.sendLine(":commit literal message");
+    await s.waitFor("git commit -m", { unwrap: true });
+    // A returning buffer, not a renderer line, includes the last subject word.
+    await s.waitFor(/日本語'$/mu, { unwrap: true });
+    const row = s.promptRow();
+    s.press("enter");
+    await s.waitForPrompt({ afterRow: row });
+    expect(repoGit("log", "-1", "--format=%s").trim()).toBe(message);
+    expect(existsSync(join(home, "sentinel"))).toBe(false);
+    expect(await s.run("echo alive")).toBe("alive");
+  });
+  it("commits only with explicit --run and reports an empty stage afterwards", async () => {
+    const s = await start(shellKind);
+    await stagedRepo(s);
+    expect(await command(s, ":commit --run greeting")).toContain(
+      "file changed",
+    );
+    expect(repoGit("log", "-1", "--format=%s").trim()).toBe(
+      "feat: draft staged changes",
+    );
+    expect(await command(s, ":commit")).toContain("no staged changes");
+    expect(await s.run("echo alive")).toBe("alive");
+  });
+});
+
 describe(`${kind} commands with the installed client and fake backend`, () => {
   it("continues turns, starts new conversations, switches and toggles, and renders info/status", async () => {
     const s = await start();
@@ -178,6 +248,8 @@ describe(`${kind} commands with the installed client and fake backend`, () => {
     expect(readFileSync(join(home, "clipboard"), "utf8")).toContain(
       "Hello from the fake backend",
     );
+    // Local help plus cached agent commands now exceeds a 30-row viewport.
+    s.resize(100, 40);
     expect(await command(s, ":help")).toContain("prefaix line grammar:");
     expect(await command(s, ":?")).toContain(":conversation");
     expect(await command(s, ":doctor")).toMatch(

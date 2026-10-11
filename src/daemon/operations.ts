@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { shellHintsFile } from "../core/paths.js";
 import { PrefaixError, unsupported, messageOf } from "../core/errors.js";
 import { parseCommandProposal } from "../core/command-proposal.js";
+import { commitMessage } from "../core/commit-proposal.js";
 import { newRecord, summarize, titleFrom } from "./store.js";
 import type { ConversationRecord, ConversationStore } from "./store.js";
 import type {
@@ -440,12 +441,12 @@ export class Operations {
     this.#checkOpen();
     if (params.edit !== undefined) {
       if (
-        params.edit !== "suggest" ||
+        (params.edit !== "suggest" && params.edit !== "commit") ||
         params.executePlan === true ||
         params.persona !== undefined ||
-        params.text.trim() === ""
+        (params.edit === "suggest" && params.text.trim() === "")
       )
-        throw new PrefaixError("USAGE", "invalid suggest turn");
+        throw new PrefaixError("USAGE", "invalid edit turn");
       this.#options.pool.require("commandProposals");
     }
     if (params.edit === undefined && params.text.startsWith("/"))
@@ -651,9 +652,28 @@ export class Operations {
       error: "the turn ended without a settle",
     };
     let buffer: string | undefined;
+    let stagedDiffHash: string | undefined;
+    let text = params.text;
     let proposals = 0;
     let restoreState: AgentState | undefined;
     try {
+      if (params.edit === "commit") {
+        const { stagedDiff } = await import("../context/staged-diff.js");
+        const diff = await stagedDiff(
+          params.cwd,
+          params.env,
+          this.#options.config.commands.commit.maxDiffBytes,
+          turn.controller.signal,
+        );
+        stagedDiffHash = diff.hash;
+        text = `Draft a commit message from this JSON data:\n${JSON.stringify({ hint: params.text, stagedDiff: diff.text, truncated: diff.truncated })}`;
+        if (diff.truncated)
+          this.publish(turn, {
+            type: "notice",
+            level: "warn",
+            text: `staged diff truncated to ${String(this.#options.config.commands.commit.maxDiffBytes)} bytes; message may omit changes`,
+          });
+      }
       const model =
         params.edit === "suggest"
           ? this.#options.config.commands.suggest.model
@@ -686,8 +706,11 @@ export class Operations {
       }
       for await (const event of session.prompt(
         {
-          text: params.text,
-          ...(params.edit === "suggest" ? { commandProposal: true } : {}),
+          text,
+          ...(params.edit === undefined ? {} : { commandProposal: true }),
+          ...(params.edit === "commit"
+            ? { commitStyle: this.#options.config.commands.commit.style }
+            : {}),
           context: {
             shell: params.shell,
             cwd: params.cwd,
@@ -715,6 +738,12 @@ export class Operations {
             command: event.text,
             explanation: "",
           })?.command;
+          if (
+            params.edit === "commit" &&
+            buffer !== undefined &&
+            commitMessage(buffer, params.shell.kind) === undefined
+          )
+            buffer = undefined;
           continue;
         }
         if (params.edit === undefined || event.type !== "settled")
@@ -821,7 +850,11 @@ export class Operations {
         if (turn.controller.signal.aborted)
           summary = { turnId: turn.id, status: "aborted" };
         if (summary.status === "stop" && buffer !== undefined) {
-          summary = { ...summary, buffer };
+          summary = {
+            ...summary,
+            buffer,
+            ...(stagedDiffHash === undefined ? {} : { stagedDiffHash }),
+          };
           this.publish(turn, { type: "set_buffer", text: buffer });
         }
         this.publish(turn, {

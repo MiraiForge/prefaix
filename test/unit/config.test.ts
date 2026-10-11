@@ -151,8 +151,28 @@ describe("config defaults", () => {
           guideline: "Produce a numbered plan. Do not modify files.",
         },
       },
-      commands: { suggest: { model: null }, commit: { maxDiffBytes: 100000 } },
+      commands: {
+        suggest: { model: null },
+        commit: {
+          maxDiffBytes: 100000,
+          style:
+            "Short imperative subject; explain non-obvious rationale in the body.",
+        },
+      },
     });
+  });
+
+  it("resolves commit style from TOML and its environment override", () => {
+    const text =
+      '[commands.commit]\nstyle = "Conventional Commits: type(scope): subject"\nmax_diff_bytes = 512\n';
+    expect(resolve(text).config.commands.commit).toEqual({
+      maxDiffBytes: 512,
+      style: "Conventional Commits: type(scope): subject",
+    });
+    expect(
+      resolve(text, { PREFAIX_COMMANDS_COMMIT_STYLE: "Imperative subject." })
+        .config.commands.commit.style,
+    ).toBe("Imperative subject.");
   });
 
   it("parses the documented sample without a diagnostic", () => {

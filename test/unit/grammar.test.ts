@@ -130,7 +130,7 @@ const CASES: readonly [string, Expect][] = [
   [":s", { kind: "command", name: "s", args: "", class: "edit", known: true }],
   [
     ": commit",
-    { kind: "command", name: "commit", args: "", class: "edit", known: false },
+    { kind: "command", name: "commit", args: "", class: "edit", known: true },
   ],
   [
     ": commit fix auth",
@@ -139,7 +139,7 @@ const CASES: readonly [string, Expect][] = [
       name: "commit",
       args: "fix auth",
       class: "edit",
-      known: false,
+      known: true,
     },
   ],
   [": retry", { kind: "command", name: "retry", args: "", known: false }],
@@ -231,7 +231,7 @@ const CASES: readonly [string, Expect][] = [
       name: "commit",
       args: "message please",
       class: "edit",
-      known: false,
+      known: true,
     },
   ],
   [

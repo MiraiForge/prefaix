@@ -1,6 +1,9 @@
 import { parseCommandProposal } from "../../core/command-proposal.js";
+import { commitCommand } from "../../core/commit-proposal.js";
+import type { ShellKind } from "../../core/agent-port.js";
 
 export const PROPOSE_COMMAND = "propose_command";
+export const PROPOSE_COMMIT = "propose_commit";
 
 export interface ProposalTool {
   name: string;
@@ -23,6 +26,52 @@ export interface ProposalTool {
 // bridge independent of pi's installed package. v0 uses a symbol; v1 ~kind.
 function schema(kind: string, fields: Record<string, unknown>) {
   return { ...fields, "~kind": kind, [Symbol.for("TypeBox.Kind")]: kind };
+}
+
+export function commitProposalTool(
+  enabled: () => boolean,
+  shell: () => ShellKind,
+): ProposalTool {
+  const tool = proposalTool(enabled);
+  return {
+    ...tool,
+    name: PROPOSE_COMMIT,
+    label: "Propose commit",
+    description:
+      "Return a plain commit message for the staged changes. Never commits.",
+    parameters: schema("Object", {
+      type: "object",
+      required: ["message", "explanation"],
+      properties: {
+        message: schema("String", { type: "string" }),
+        explanation: schema("String", { type: "string" }),
+      },
+      additionalProperties: false,
+    }),
+    execute(id, args, signal) {
+      const message =
+        args !== null && typeof args === "object"
+          ? (Object.getOwnPropertyDescriptor(args, "message")?.value as unknown)
+          : undefined;
+      const explanation =
+        args !== null && typeof args === "object"
+          ? (Object.getOwnPropertyDescriptor(args, "explanation")
+              ?.value as unknown)
+          : undefined;
+      const validated = tool.execute(
+        id,
+        { command: message, explanation },
+        signal,
+      );
+      return {
+        ...validated,
+        details: {
+          ...validated.details,
+          command: commitCommand(validated.details.command, shell()),
+        },
+      };
+    },
+  };
 }
 
 export function proposalTool(enabled: () => boolean): ProposalTool {
