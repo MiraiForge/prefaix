@@ -161,8 +161,8 @@ const CASES: readonly [string, Expect][] = [
     ": skill review",
     { kind: "command", name: "skill", args: "review", known: false },
   ],
-  [": attach", { kind: "command", name: "attach", args: "", known: false }],
-  [": abort", { kind: "command", name: "abort", args: "", known: false }],
+  [": attach", { kind: "command", name: "attach", args: "", known: true }],
+  [": abort", { kind: "command", name: "abort", args: "", known: true }],
   [": tui", { kind: "command", name: "tui", args: "", known: false }],
   [": backend", { kind: "command", name: "backend", args: "", known: false }],
 

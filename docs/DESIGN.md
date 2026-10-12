@@ -40,7 +40,7 @@ prefaix is a shell integration layer: type `: fix the failing test` at your norm
 | D1 | **Daemon holds warm agent processes.** A short-lived client renders each turn. | Measured pi RPC cold start on Allan's machine: **~740–860 ms** with 5 extensions (~215 ms with `--no-extensions`), plus up to ~500 ms shutdown. Spawning per prompt is too slow. | Spawn `pi -p` per prompt (the Forge/pi-zsh-plugin model); a persistent PTY wrapper (pish). |
 | D2 | **Agent runs as a child process over RPC** (`pi --mode rpc`), not the in-process SDK. | Crash isolation. It uses *your* installed pi version and extensions, and each child gets its own env and cwd. | pi SDK inside the daemon; pi's `RpcClient` at runtime (pulls in a second full pi install and invites version skew). |
 | D3 | **Inline execution from an Enter interceptor**: zsh ZLE widget, fish `bind \r`, bash macro + `bind -x`. | This is the only way to see the raw line before the shell parses it, so apostrophes, `$()`, globs, and `!` all work unquoted. | Defining a `:` function or using preexec/`command_not_found`, which break on quotes and globs. |
-| D4 | **Renderer lives in the foreground client.** The daemon only relays normalized events. | The client owns the tty (size, raw keys, colors). The daemon stays headless, which enables detach/attach later. | Daemon writes to the tty directly. |
+| D4 | **Renderer lives in the foreground client.** The daemon only relays normalized events. | The client owns the tty (size, raw keys, colors). The daemon stays headless, which enables detach/attach. | Daemon writes to the tty directly. |
 | D5 | **Client puts the tty in raw mode during a turn.** | Esc and Ctrl+C arrive as bytes (abort without signals hitting the shell). Typed-ahead text is captured and restored into the prompt instead of garbling output. | Cooked mode with SIGINT only (no Esc; typing corrupts the stream). |
 | D6 | **The shell owns "which conversation"; the daemon owns conversation data.** `PREFAIX_CONVERSATION_ID` is a non-exported shell variable. | Survives daemon restarts. Each terminal/pane gets its own conversation (Forge parity). Subshells don't inherit it by accident. | Daemon-side shell registry as the source of truth. |
 | D7 | **Directives are data, not code.** The client returns state changes as a NUL-delimited key/value file the plugin applies through a whitelist. | No `eval` or `source` of generated text, so model output can never be executed by the shell. | Sourcing generated shell code; fd-3 capture through command substitution. |
@@ -94,8 +94,8 @@ History: the original line is added to shell history exactly as typed (zsh `prin
 | `:skill [name] [args]` | | run | M4 | Picker over agent skills. pi maps this to `/skill:<name>`. |
 | `:ask <q>` / `:plan <task>` | | run | M4 | Built-in personas (read-only tools plus a persona prompt). User-defined personas come from config. The selection persists on ordinary prompts and respawn; `:info` shows it. |
 | `:go` | | run | M4 | Execute a successful, nonempty planning answer with the normal backend tools in the same conversation/root. No arguments; reject failed, consumed, or cross-root plans. |
-| `:attach` | | run | M4 | Re-attach to a detached or still-running turn and replay its output. |
-| `:abort` | | run | M4 | Abort a detached turn. |
+| `:attach` | | run | M4 | Replay the current conversation's latest retained turn and follow it if detached and still running; never steal another foreground owner. |
+| `:abort` | | run | M4 | Abort the current conversation's detached turn, without taking the tty. |
 | `:tui` | | run | M4 | Opens this conversation in pi's full TUI. Afterwards the conversation continues in prefaix. |
 | `:backend [id]` | | run | M5 | Only shows the current backend until a second adapter exists. |
 
@@ -103,8 +103,8 @@ History: the original line is added to shell history exactly as typed (zsh `prin
 
 | Key | Action |
 |---|---|
-| Esc / Ctrl+C | Abort the turn (clear the queue, then abort). A second Ctrl+C within 1 s force-detaches the client. |
-| Ctrl+Z | **Detach** (M4). The turn continues in the daemon, the prompt returns, the right prompt shows `⟳`, and `:attach` replays. |
+| Esc / Ctrl+C | Abort the turn and restore the tty when it settles. Queue-clearing and repeated-key force-detach refinements remain planned. |
+| Ctrl+Z | **Detach** after the daemon acknowledges ownership transfer. The turn continues, the tty/typeahead returns, and `:attach` replays/follows it. Running edit turns refuse detachment. |
 | Other typing | Captured, never echoed into the stream, and **restored into your next prompt buffer**, so typeahead works like normal shell typeahead. In M4, Enter sends the captured line as a **steer** message instead. |
 
 ### 3.4 What a turn looks like
@@ -377,7 +377,7 @@ Newline-delimited JSON over the unix socket. Framing splits on `\n` only (not `r
 
 | Area | Ops |
 |---|---|
-| Turns | `turn.start`, `turn.suggest` / `turn.commit` (M4 edit), `turn.abort`, `turn.steer` (M4), `turn.attach {turnId?, fromSeq}` (M4), `ui.respond` |
+| Turns | `turn.start`, `turn.suggest` / `turn.commit` (M4 edit), `turn.detach {turnId}`, `turn.abort {turnId?, conversationId?}`, `turn.steer` (planned M4), `turn.attach {conversationId?, fromSeq, follow?, shell?}`, `ui.respond` |
 | Conversations | `conv.new`, `conv.list`, `conv.get`, `conv.rename`, `conv.lastText`, `conv.compact` |
 | Model and commands | `model.list`, `model.set`, `thinking.set`, `commands.list` |
 | Status and daemon | `status.get`, `daemon.ping`, `daemon.stop` |
@@ -410,7 +410,12 @@ interface TurnStartParams {
 - **Abort:** `clear_queue` then `abort` on the adapter. It always resolves to a `settled {stopReason:"aborted"}`.
 - **Disconnect:**
   - If the client socket closes without a detach, apply `onDisconnect` (default **abort**, the least surprise, matching closing a pi TUI).
-  - Detach (M4) marks the turn as unowned, keeps it running, and writes the shell's status file (`⟳ running` / `✓ done` / `✗ error`).
+  - `turn.detach` requires the owning connection and refuses edit turns or finalization already in progress. It marks the turn unowned and publishes `⟳ running` before acknowledging the matching turn/conversation IDs. Pending status writes finish before outcome publication. Explicit continuation-on-disconnect keeps the running turn addressable.
+- **Attach/replay:** `turn.attach {conversationId, fromSeq, follow: true, shell}` claims a detached running turn or replays the latest finished turn. A still-active foreground owner causes `CONVERSATION_BUSY`; running edit turns cannot be followed. The explicit `following: true` response prevents an older snapshot-only daemon from pretending to support live attach. Omitted `follow` retains the snapshot-only debug tap without changing ownership.
+  - While following replay is backpressured, live event/end forwarding pauses. Replay catches up from the bounded ring using a monotonic cursor, then transitions to live forwarding without duplicate sequence delivery or an unbounded secondary queue. The client warns about evicted gaps. Rings retain the latest turn per conversation in daemon memory (4 MiB default, 64 completed conversations), not across daemon restarts.
+  - Detach cancels outstanding dialogs; new detached dialogs receive `{cancelled: true}` immediately. Following replay replaces answered UI requests with inert notices at the same sequence, never asks an old question again, and holds edit buffers until the finalized summary. Completed edit proposals can only be followed in their original shell; `:attach` never enables automatic commit execution.
+- **Background status:** daemon writes `⟳ running` / `✓ done` / `✗ error` for the originating and following shell IDs. Writes are serialized per status path, and older turn completions do not replace a newer detached turn's status. Detaching/aborting clients leave this cache authoritative. Existing builtin-only prompt hooks read it on the next normal prompt draw; no forced redraw or polling process is introduced. Abort is reported as done rather than failure.
+- **Detached abort:** `turn.abort {conversationId}` targets only an unowned running turn; explicit turn-ID abort remains compatible with existing foreground/debug callers.
 
 #### 4.3.4 Agent pool
 

@@ -199,6 +199,17 @@ successful finalization and a staged-diff snapshot check. Fake, scripted-adapter
 and shell PTY tests validate this slice; native model evidence and supported
 platform CI remain separate, as do all M3 human/release gates.
 
+**M4-3 implementation:** acknowledged Ctrl+Z detachment, `:attach` replay/live
+following, and detached-conversation `:abort` are implemented locally. Replay
+catches up from bounded sequence rings without duplicating live events; gaps
+are reported. Pending/new detached dialogs cancel, and edit turns cannot detach.
+Serialized prompt-cache writes expose running/done/error on the next normal
+prompt draw without a watcher or forced keypress. Fake/scripted tests cover
+ownership, backpressure, cancellation, and finalization; local zsh/fish/bash PTY
+flows cover detach → `ls` → attach, repeated detach/abort, exact tty restoration,
+and background success/failure prompts. Native pi and exact-artifact supported
+platform CI remain separate, as do M3 human/release gates.
+
 **M4-5 state (2026-10-08):** built-in/custom persona commands, persistent
 selection, and `:plan` → `:go` are implemented and review-hardened. Native pi 1.0.4 against an
 isolated loopback API verifies tool schemas, transcript tool deltas, normal-tool

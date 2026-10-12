@@ -20,7 +20,7 @@ but **0.1.0 has not shipped**.
 | **M1 — Design spikes** | Complete for measured decisions | S1 lifecycle; S2 pool economics; S3 safe cwd policy; S4–S7 shell/addon/tty mechanics; S8 macOS/Linux startup; S9 bridge/tools/UI. Eleven reviewed native pi fixtures. | Broader terminal/addon versions; the separate controlled native dialog hardening is now verified on pi 1.0.4, not merely inferred from replay. |
 | **M2 — Core** | Complete | Backend-independent AgentPort, fake and pi adapters, bridge, daemon/pool/store, foreground client, safe directives, renderer, CLI, and contracts; cumulative usage/cache-cost accounting, verified live provider/model selection, and resume/bridge/UI fixes. | Ongoing hardening and wider compatibility. Long-held pi 1.0.4 dialogs now use paused acceptance deadlines and safe child replacement on abort. |
 | **M3 — Triple-shell MVP → 0.1.0** | Implemented; acceptance in progress | zsh/fish/bash plugins, bash 3.2 fallback, MVP commands, pickers, prompt status, doctor, setup/uninstall, docs, and green exact-head macOS/Linux CI at `d2de470`, including four 50/50 stability gates and enforced main checks. | Keep the eventual release artifact green; human walkthrough/daily-use checks, release preparation, and explicit publishing approval. |
-| **M4 — Parity and beyond Forge** | In progress | Built-in/custom personas, `:plan` → `:go`, command suggestions, and staged commit drafting. | Detach/attach, steering, completions, TUI handoff, additional conversation commands, richer context capture, and terminal polish. |
+| **M4 — Parity and beyond Forge** | In progress | Built-in/custom personas, `:plan` → `:go`, command suggestions, staged commit drafting, and detach/attach. | Steering, completions, TUI handoff, additional conversation commands, richer context capture, and terminal polish. |
 | **M5 — Hardening → 1.0** | Planned | Backend abstraction and safety checks to build on. | A second adapter and backend switching, security review, wider distribution/docs site, WSL/terminal validation, and conditional compiled-client/ble.sh work. |
 
 [S1](docs/spikes/S1-pi-rpc-lifecycle.md) combines real Kimi turns with native pi
@@ -175,7 +175,37 @@ command; an unknown tight name reports suggestions rather than prompting a model
 | Run a pi command or skill | `:/command [args]`, e.g. `:/skill:review` |
 | Suggest a shell command without executing | `:suggest <want>`, `:s <want>`; review/edit the returned buffer, then press Enter |
 | Draft a commit from staged changes | `:commit [hint]`; review/edit the buffer, then press Enter; `:commit --run [hint]` commits directly |
-| Detach/attach, TUI handoff | Planned for M4 |
+| Background a running turn | Ctrl+Z; `:attach` replays/follows the current conversation; `:abort` stops its detached turn |
+| TUI handoff | Planned for M4 |
+
+## Detach and attach
+
+Press **Ctrl+Z during a normal turn** to return to the shell while the daemon
+continues working. This is acknowledged detachment, not a stopped shell job.
+Typed-ahead text returns to the editable buffer without executing. You can run
+ordinary commands such as `ls`, then use `:attach` to replay the current
+conversation's output and follow it live. Ctrl+Z can detach the attached stream
+again; Esc or Ctrl+C aborts it instead. Use `:abort` from the shell to stop the
+current conversation's **detached** turn; it cannot steal another foreground
+client's turn.
+
+The prompt cache shows `⟳ running`, `✓ done`, or `✗ error`. Existing zsh/fish
+right-prompt hooks and the bash PS1 fallback read it using shell builtins on the
+**next prompt draw**, with no watcher or polling subprocess. Completion does
+not force an idle prompt to redraw. Only the most recently detached turn for a
+shell may update its background status.
+
+Replay is a bounded, in-memory event ring, not a persistent transcript viewer.
+Older output can be evicted; `:attach` warns about gaps and suppresses duplicate
+sequence numbers. Rings disappear when the daemon exits. Running `:suggest`
+and `:commit` edit turns cannot detach or be followed from another client.
+Completed edit replay still requires review and Enter, and is restricted to its
+original shell so quoting cannot change meaning. Detaching cancels pending and
+new extension dialogs rather than leaving an invisible question blocked.
+
+This slice is covered by fake/scripted unit tests and local zsh/fish/bash PTY
+flows. Native pi behavior and exact-artifact Linux/macOS CI remain separate
+validation work; it does not satisfy the M3 human or release gates.
 
 ## Commit drafting
 

@@ -51,7 +51,14 @@ export const PLAN_EXECUTION_PROMPT =
   "Execute the plan above. Use the normal tools to implement it.";
 
 export interface TurnAbortParams {
+  turnId?: string;
+  /** With no turn id, abort only this conversation's detached turn. */
+  conversationId?: string;
+}
+
+export interface TurnDetachResult {
   turnId: string;
+  conversationId: string;
 }
 
 export interface UiRespondParams {
@@ -125,6 +132,18 @@ export interface TurnAttachParams {
   conversationId?: string;
   /** Replay from this sequence; the daemon answers with the oldest it still has. */
   fromSeq: number;
+  /** Opt into ownership/live forwarding; omitted preserves snapshot debug tap. */
+  follow?: boolean;
+  shell?: ShellVersionInfo;
+}
+
+export interface TurnAttachResult {
+  turnId: string;
+  fromSeq: number;
+  /** An explicit handshake so old daemons cannot pretend to follow. */
+  following?: true;
+  conversationId?: string;
+  edit?: "suggest" | "commit";
 }
 
 export interface ConvLastTextParams {
@@ -191,10 +210,11 @@ export interface Operations {
   "turn.suggest": { params: TurnStartParams; result: TurnStartResult };
   "turn.commit": { params: TurnStartParams; result: TurnStartResult };
   "turn.abort": { params: TurnAbortParams; result: { turnId: string } };
+  "turn.detach": { params: { turnId: string }; result: TurnDetachResult };
   "ui.respond": { params: UiRespondParams; result: { ok: true } };
   "turn.attach": {
     params: TurnAttachParams;
-    result: { turnId: string; fromSeq: number };
+    result: TurnAttachResult;
   };
   "conv.new": { params: ConvNewParams; result: ConversationSummary };
   "conv.select": {
@@ -252,6 +272,7 @@ export const OPERATION_NAMES: readonly OperationName[] = [
   "turn.suggest",
   "turn.commit",
   "turn.abort",
+  "turn.detach",
   "ui.respond",
   "turn.attach",
   "conv.new",
