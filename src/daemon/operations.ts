@@ -357,7 +357,7 @@ export class Operations {
     const turn = this.#options.turns.get(params.turnId);
     if (turn === undefined || turn.finishing)
       throw new PrefaixError(
-        "USAGE",
+        "CONVERSATION_NOT_FOUND",
         "the turn is already finishing or no longer running",
       );
     if (this.#owned.get(turn.id)?.id !== connection.id)
@@ -1082,7 +1082,10 @@ export class Operations {
     }
   }
 
-  async turnAbort(params: TurnAbortParams): Promise<{ turnId: string }> {
+  async turnAbort(
+    params: TurnAbortParams,
+    connection?: Connection,
+  ): Promise<{ turnId: string }> {
     const turn =
       params.turnId === undefined
         ? this.#options.turns.runningFor(params.conversationId ?? "")
@@ -1095,7 +1098,12 @@ export class Operations {
           : `no turn with id ${JSON.stringify(params.turnId)}`,
       );
     }
-    if (params.turnId === undefined && turn.owner !== "detached")
+    if (
+      params.turnId === undefined &&
+      turn.owner !== "detached" &&
+      (connection === undefined ||
+        this.#owned.get(turn.id)?.id !== connection.id)
+    )
       throw new PrefaixError(
         "CONVERSATION_BUSY",
         "this turn is attached to another foreground client",

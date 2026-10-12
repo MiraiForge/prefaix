@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Daemon } from "../../src/daemon/daemon.js";
+import { Operations } from "../../src/daemon/operations.js";
 import { FakeSession } from "../../src/agents/fake/adapter.js";
 import { DaemonClient } from "../../src/client/connection.js";
 import { run, type RunOptions } from "../../src/client/run.js";
@@ -324,7 +325,7 @@ it("refuses edit detachment and unknown turn ids without releasing ownership", a
   ).toBe("UNSUPPORTED");
   expect(
     (await original.call("turn.detach", { turnId: "unknown" })).error?.code,
-  ).toBe("USAGE");
+  ).toBe("CONVERSATION_NOT_FOUND");
   expect(daemon.turns.get(started.turnId)?.owner).toBe("attached");
 });
 it("Ctrl+Z restores the tty and typeahead, preserves daemon status, and :attach replays the complete turn", async () => {
@@ -501,6 +502,158 @@ it("does not accept a legacy snapshot-only daemon as a live attachment", async (
     }),
   ).toBe(2);
   expect(output.join("")).toContain("cannot follow an attached turn");
+});
+it.each([
+  ["ctrl-z", "\u001a", 0],
+  ["ctrl-c", "\u0003", 130],
+  ["esc", "\u001b", 130],
+] as const)(
+  "stops completed replay with %s before its backpressured attach response",
+  async (_name, key, exit) => {
+    const original = await client();
+    const started = await start(original);
+    pause.open();
+    await finished(started.conversationId);
+    const held = gate();
+    const entered = gate();
+    const attach = Operations.prototype.turnAttach;
+    vi.spyOn(Operations.prototype, "turnAttach").mockImplementation(function (
+      this: Operations,
+      args,
+      connection,
+    ) {
+      return attach.call(this, args, {
+        ...connection,
+        get closed() {
+          return connection.closed;
+        },
+        waitWritable: (signal?: AbortSignal) => {
+          entered.open();
+          if (connection.closed || signal?.aborted) return;
+          if (signal === undefined) return held.promise;
+          return new Promise<void>((resolve) => {
+            const release = () => {
+              signal.removeEventListener("abort", release);
+              resolve();
+            };
+            signal.addEventListener("abort", release, { once: true });
+            void held.promise.then(release);
+          });
+        },
+      });
+    });
+    const tty = input();
+    const pending = invoke(":attach", started.conversationId, { tty: tty.tty });
+    try {
+      await entered.promise;
+      tty.send(key);
+      expect(await pending).toBe(exit);
+      expect(tty.modes).toEqual([true, false]);
+      expect(directives().buffer).toBeUndefined();
+      expect(
+        daemon.turns.lastFor(started.conversationId)?.summary?.status,
+      ).toBe("stop");
+      expect(output.join("")).not.toContain("after detach");
+    } finally {
+      held.open();
+    }
+  },
+);
+it("cancellation of a pending live attach aborts even a continue-on-disconnect turn", async () => {
+  const original = await client();
+  const started = await start(original, { onDisconnect: "continue" });
+  await detach(original, started);
+  const held = gate();
+  const entered = gate();
+  const attach = Operations.prototype.turnAttach;
+  vi.spyOn(Operations.prototype, "turnAttach").mockImplementation(function (
+    this: Operations,
+    args,
+    connection,
+  ) {
+    return attach.call(this, args, {
+      ...connection,
+      get closed() {
+        return connection.closed;
+      },
+      waitWritable: (signal?: AbortSignal) => {
+        entered.open();
+        if (connection.closed || signal?.aborted) return;
+        if (signal === undefined) return held.promise;
+        return new Promise<void>((resolve) => {
+          const release = () => {
+            signal.removeEventListener("abort", release);
+            resolve();
+          };
+          signal.addEventListener("abort", release, { once: true });
+          void held.promise.then(release);
+        });
+      },
+    });
+  });
+  const tty = input();
+  const pending = invoke(":attach", started.conversationId, { tty: tty.tty });
+  try {
+    await entered.promise;
+    tty.send("\u0003");
+    expect(await pending).toBe(130);
+    await finished(started.conversationId);
+    expect(daemon.turns.lastFor(started.conversationId)?.summary?.status).toBe(
+      "aborted",
+    );
+  } finally {
+    held.open();
+  }
+});
+it("cancelled completed edit replay cannot restore a finalized command while its reply is blocked", async () => {
+  pause.open();
+  vi.spyOn(FakeSession.prototype, "prompt").mockImplementation(
+    async function* () {
+      yield { type: "set_buffer", text: "echo safe" };
+      yield { type: "settled", stopReason: "stop" };
+    },
+  );
+  expect(await invoke(":suggest command")).toBe(0);
+  const id = directives().conversation!;
+  const held = gate();
+  const entered = gate();
+  const attach = Operations.prototype.turnAttach;
+  vi.spyOn(Operations.prototype, "turnAttach").mockImplementation(function (
+    this: Operations,
+    args,
+    connection,
+  ) {
+    return attach.call(this, args, {
+      ...connection,
+      get closed() {
+        return connection.closed;
+      },
+      waitWritable: (signal?: AbortSignal) => {
+        entered.open();
+        if (connection.closed || signal?.aborted) return;
+        if (signal === undefined) return held.promise;
+        return new Promise<void>((resolve) => {
+          const release = () => {
+            signal.removeEventListener("abort", release);
+            resolve();
+          };
+          signal.addEventListener("abort", release, { once: true });
+          void held.promise.then(release);
+        });
+      },
+    });
+  });
+  const tty = input();
+  const pending = invoke(":attach", id, { tty: tty.tty });
+  try {
+    await entered.promise;
+    tty.send("\u001a");
+    expect(await pending).toBe(0);
+    expect(directives().buffer).toBeUndefined();
+    expect(output.join("")).toContain("replay stopped");
+  } finally {
+    held.open();
+  }
 });
 it("warns about evicted output rather than pretending replay is complete", async () => {
   const original = await client();

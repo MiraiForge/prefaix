@@ -350,8 +350,8 @@ One daemon per user, auto-spawned, headless, with an idle exit.
   3. It spawns `process.execPath <bundle> daemon`, detached with its own session, stdio to the log, `unref()`.
   4. It polls connect for up to 3 s with backoff.
 - **Handshake:** `hello {v, version}`.
-  - Protocol `v` mismatch is fatal, with a hint.
-  - A package version mismatch (after `npm i -g` upgrades) means: if the old daemon is idle, the client asks it to `daemon.stop` and spawns a fresh one. If it's busy, the client uses it for this turn and prints `restart pending`, and the daemon exits after its turns settle.
+  - Protocol `v` mismatch is fatal, with a restart hint, before the client enters raw mode. Protocol v2 rejects v1 daemons that silently discard the new commit/detach operations; both ends validate the hello revision.
+  - Automatic idle-daemon replacement on a package-version change remains planned. A protocol mismatch never falls back to a busy old daemon: stop it with its original CLI, or terminate the PID recorded in `daemon.lock`, then retry. A new CLI cannot issue normal RPCs to an incompatible daemon.
 - **Idle exit:** 30 min with no clients and no running turns. Children are closed gracefully (stdin EOF, then SIGTERM after 3 s, then SIGKILL after 5 s).
 - **Logs:** `~/.local/state/prefaix/logs/daemon.log`, size-rotated. Each child's stderr is captured with a prefix, and never parsed as protocol.
 
@@ -361,13 +361,13 @@ Newline-delimited JSON over the unix socket. Framing splits on `\n` only (not `r
 
 ```jsonc
 // client → daemon
-{"t":"hello","v":1,"version":"0.1.0","pid":4242}
+{"t":"hello","v":2,"version":"0.1.0","pid":4242}
 {"t":"req","id":"r1","op":"turn.start","params":{ /* TurnStartParams */ }}
 {"t":"req","id":"r2","op":"turn.abort","params":{"turnId":"t_01J…"}}
 {"t":"req","id":"r3","op":"ui.respond","params":{"turnId":"t_01J…","requestId":"u1","response":{"value":"Allow"}}}
 
 // daemon → client
-{"t":"hello","v":1,"version":"0.1.0","pid":777}
+{"t":"hello","v":2,"version":"0.1.0","pid":777}
 {"t":"res","id":"r1","ok":true,"data":{"turnId":"t_01J…","conversationId":"c_01J…"}}
 {"t":"evt","turnId":"t_01J…","seq":17,"e":{"type":"text_delta","block":0,"text":"Fixed."}}
 {"t":"res","id":"r9","ok":false,"error":{"code":"AGENT_UNAVAILABLE","message":"pi not found on PATH","hint":"prefaix doctor"}}
@@ -412,10 +412,10 @@ interface TurnStartParams {
   - If the client socket closes without a detach, apply `onDisconnect` (default **abort**, the least surprise, matching closing a pi TUI).
   - `turn.detach` requires the owning connection and refuses edit turns or finalization already in progress. It marks the turn unowned and publishes `⟳ running` before acknowledging the matching turn/conversation IDs. Pending status writes finish before outcome publication. Explicit continuation-on-disconnect keeps the running turn addressable.
 - **Attach/replay:** `turn.attach {conversationId, fromSeq, follow: true, shell}` claims a detached running turn or replays the latest finished turn. A still-active foreground owner causes `CONVERSATION_BUSY`; running edit turns cannot be followed. The explicit `following: true` response prevents an older snapshot-only daemon from pretending to support live attach. Omitted `follow` retains the snapshot-only debug tap without changing ownership.
-  - While following replay is backpressured, live event/end forwarding pauses. Replay catches up from the bounded ring using a monotonic cursor, then transitions to live forwarding without duplicate sequence delivery or an unbounded secondary queue. The client warns about evicted gaps. Rings retain the latest turn per conversation in daemon memory (4 MiB default, 64 completed conversations), not across daemon restarts.
+  - While following replay is backpressured, live event/end forwarding pauses. Replay catches up from the bounded ring using a monotonic cursor, then transitions to live forwarding without duplicate sequence delivery or an unbounded secondary queue. The client warns about evicted gaps. Attach controls are installed before its replay response: Esc/Ctrl+C can stop the local reader while asking the daemon to abort any owned live turn; Ctrl+Z waits for live detach acknowledgment, or stops a retained/finalizing replay after an explicit no-live-turn response. Closing the reader releases socket backpressure; stopped replay never restores an edit buffer. Rings retain the latest turn per conversation in daemon memory (4 MiB default, 64 completed conversations), not across daemon restarts.
   - Detach cancels outstanding dialogs; new detached dialogs receive `{cancelled: true}` immediately. Following replay replaces answered UI requests with inert notices at the same sequence, never asks an old question again, and holds edit buffers until the finalized summary. Completed edit proposals can only be followed in their original shell; `:attach` never enables automatic commit execution.
 - **Background status:** daemon writes `⟳ running` / `✓ done` / `✗ error` for the originating and following shell IDs. Writes are serialized per status path, and older turn completions do not replace a newer detached turn's status. Detaching/aborting clients leave this cache authoritative. Existing builtin-only prompt hooks read it on the next normal prompt draw; no forced redraw or polling process is introduced. Abort is reported as done rather than failure.
-- **Detached abort:** `turn.abort {conversationId}` targets only an unowned running turn; explicit turn-ID abort remains compatible with existing foreground/debug callers.
+- **Detached abort:** `turn.abort {conversationId}` targets an unowned running turn, or the same connection's own turn when an attach was interrupted before its reply. Another foreground owner is always refused; explicit turn-ID abort remains compatible with existing foreground/debug callers.
 
 #### 4.3.4 Agent pool
 

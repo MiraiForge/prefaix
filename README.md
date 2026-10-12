@@ -197,7 +197,8 @@ shell may update its background status.
 
 Replay is a bounded, in-memory event ring, not a persistent transcript viewer.
 Older output can be evicted; `:attach` warns about gaps and suppresses duplicate
-sequence numbers. Rings disappear when the daemon exits. Running `:suggest`
+sequence numbers. Esc/Ctrl+C also cancels a finished replay locally, and Ctrl+Z
+stops that replay after the daemon confirms there is no live work to detach. Rings disappear when the daemon exits. Running `:suggest`
 and `:commit` edit turns cannot detach or be followed from another client.
 Completed edit replay still requires review and Enter, and is restricted to its
 original shell so quoting cannot change meaning. Detaching cancels pending and
@@ -233,7 +234,11 @@ finalization, and checks that the staged diff still matches the captured
 snapshot. If the stage changed, or Git/hooks fail, it reports the error and
 never retries automatically. This is a pre-execution check, not an index lock;
 concurrent staging after that check and changes made by Git hooks remain normal
-Git behavior. Use `:commit -- --run …` to treat `--run` as hint text.
+Git behavior. Hooks and signing programs cannot read stdin in `--run` mode;
+complete any interactive authentication beforehand, or review the returned
+buffer and run it with Enter instead. If a hook stalls, Esc/Ctrl+C cancels the
+foreground Git process; no short timeout is imposed on legitimate long hooks.
+Use `:commit -- --run …` to treat `--run` as hint text.
 
 ## Command suggestions
 

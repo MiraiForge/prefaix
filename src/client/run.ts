@@ -608,8 +608,94 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
   });
   ended.catch(() => undefined);
   let lastSeq = 0;
-  client.onEvent((turnId, { seq, event }) => {
-    options.setTurnId(turnId);
+  let turnId: string | undefined;
+  let conversationId = args.conversationId;
+  let acknowledged = false;
+  let finished = false;
+  let detachRequested = false;
+  let abortSent = false;
+  let resolveControl!: (outcome: TurnRun) => void;
+  let rejectControl!: (cause: unknown) => void;
+  const controlled = new Promise<TurnRun>((resolve, reject) => {
+    resolveControl = resolve;
+    rejectControl = reject;
+  });
+  const onAbort = (): void => {
+    const params =
+      turnId === undefined
+        ? options.attach
+          ? { conversationId }
+          : undefined
+        : { turnId };
+    if (params !== undefined && !abortSent) {
+      abortSent = true;
+      void client.call("turn.abort", params).catch(() => undefined);
+    }
+    // A retained replay has no live turn to settle. Stop the local reader even
+    // while its attach response is backpressured; socket close releases replay.
+    if (options.attach) resolveControl({ exit: EXIT.aborted, conversationId });
+  };
+  const onDetach = (): void => {
+    if (
+      finished ||
+      detachRequested ||
+      turnId === undefined ||
+      (!acknowledged && !options.attach)
+    )
+      return;
+    detachRequested = true;
+    const id = turnId;
+    void client
+      .call<TurnDetachResult>("turn.detach", { turnId: id })
+      .then((result) => {
+        if (finished) return;
+        if (
+          result?.turnId !== id ||
+          result?.conversationId !== conversationId
+        ) {
+          onAbort();
+          rejectControl(
+            new PrefaixError(
+              "UNSUPPORTED",
+              "the daemon did not acknowledge this turn's detach",
+            ),
+          );
+          return;
+        }
+        renderer.notice(
+          options.controller.signal.aborted
+            ? "detached turn abort requested"
+            : "turn detached; use :attach to watch it or :abort to stop it",
+        );
+        resolveControl({
+          exit: options.controller.signal.aborted ? EXIT.aborted : EXIT.ok,
+          conversationId,
+          detached: true,
+        });
+      })
+      .catch((cause) => {
+        if (finished) return;
+        if (
+          options.attach &&
+          cause instanceof PrefaixError &&
+          cause.code === "CONVERSATION_NOT_FOUND"
+        ) {
+          // The daemon explicitly confirms this retained/finalizing turn has
+          // no live work to detach. Closing our reader cancels replay, not work.
+          renderer.notice("replay stopped");
+          resolveControl({ exit: EXIT.ok, conversationId });
+        } else renderer.notice(`cannot detach: ${messageOf(cause)}`, "warn");
+      });
+  };
+  options.controller.signal.addEventListener("abort", onAbort, { once: true });
+  options.detach.addEventListener("abort", onDetach, { once: true });
+  client.onEvent((id, { seq, event }) => {
+    if (finished) return;
+    turnId = id;
+    options.setTurnId(id);
+    if (options.controller.signal.aborted) onAbort();
+    if (options.attach && options.detach.aborted) onDetach();
+    if (options.attach && options.controller.signal.aborted) return;
     if (seq <= lastSeq) return;
     if (options.attach && seq > lastSeq + 1)
       renderer.notice(
@@ -623,128 +709,76 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
     )
       renderer.handle(event);
   });
-
-  const started = options.attach
-    ? await client.call<TurnAttachResult>("turn.attach", {
-        conversationId: args.conversationId,
-        fromSeq: 1,
-        follow: true,
-        shell: shellInfo(args),
-      })
-    : await client.call<{ turnId: string; conversationId: string }>(
-        options.edit === undefined
-          ? "turn.start"
-          : options.edit === "commit"
-            ? "turn.commit"
-            : "turn.suggest",
-        {
-          ...(args.conversationId === ""
-            ? {}
-            : { conversationId: args.conversationId }),
-          shell: built.context.shell,
-          cwd: built.context.cwd,
-          env: built.agentEnv,
-          text: options.text,
-          ...(options.edit === undefined ? {} : { edit: options.edit }),
-          ...(options.persona === undefined
-            ? {}
-            : { persona: options.persona }),
-          ...(options.executePlan === undefined
-            ? {}
-            : { executePlan: options.executePlan }),
-          context: {
-            recent: built.context.recent,
-            os: built.context.os,
-            term: built.context.term,
-          },
-        },
-      );
-  if (options.attach && (started as TurnAttachResult).following !== true)
-    throw new PrefaixError(
-      "UNSUPPORTED",
-      "this daemon cannot follow an attached turn; restart it after upgrading",
-    );
-  const conversationId = started.conversationId ?? args.conversationId;
-  options.setTurnId(started.turnId);
-  options.setConversationId(conversationId);
-
-  // Esc aborts locally and tells the daemon, so the turn ends even if the client
-  // dies on the way out.
-  const onAbort = (): void => {
-    void client
-      .call("turn.abort", { turnId: started.turnId })
-      .catch(() => undefined);
-  };
-  options.controller.signal.addEventListener("abort", onAbort, { once: true });
-
-  if (options.controller.signal.aborted) onAbort();
-  let finished = false;
-  let removeDetach = () => {};
-  const detached = new Promise<TurnRun>((resolve, reject) => {
-    const onDetach = (): void => {
-      void client
-        .call<TurnDetachResult>("turn.detach", { turnId: started.turnId })
-        .then((result) => {
-          if (finished) return;
-          if (
-            result?.turnId !== started.turnId ||
-            result?.conversationId !== conversationId
-          ) {
-            // A malformed acknowledgment may already have transferred ownership;
-            // waiting for that unowned turn would hang. Abort the known id and
-            // fail closed rather than trusting a different turn or restoring a proposal.
-            onAbort();
-            reject(
-              new PrefaixError(
-                "UNSUPPORTED",
-                "the daemon did not acknowledge this turn's detach",
-              ),
-            );
-            return;
-          }
-          renderer.notice(
-            options.controller.signal.aborted
-              ? "detached turn abort requested"
-              : "turn detached; use :attach to watch it or :abort to stop it",
-          );
-          resolve({
-            exit: options.controller.signal.aborted ? EXIT.aborted : EXIT.ok,
-            conversationId,
-            detached: true,
-          });
-        })
-        .catch((cause) => {
-          if (!finished)
-            renderer.notice(`cannot detach: ${messageOf(cause)}`, "warn");
-        });
-    };
-    options.detach.addEventListener("abort", onDetach, { once: true });
-    if (options.detach.aborted) onDetach();
-    removeDetach = () => options.detach.removeEventListener("abort", onDetach);
-  });
   try {
-    const outcome = await Promise.race([ended, detached]);
+    const request = options.attach
+      ? client.call<TurnAttachResult>("turn.attach", {
+          conversationId: args.conversationId,
+          fromSeq: 1,
+          follow: true,
+          shell: shellInfo(args),
+        })
+      : client.call<{ turnId: string; conversationId: string }>(
+          options.edit === undefined
+            ? "turn.start"
+            : options.edit === "commit"
+              ? "turn.commit"
+              : "turn.suggest",
+          {
+            ...(args.conversationId === ""
+              ? {}
+              : { conversationId: args.conversationId }),
+            shell: built.context.shell,
+            cwd: built.context.cwd,
+            env: built.agentEnv,
+            text: options.text,
+            ...(options.edit === undefined ? {} : { edit: options.edit }),
+            ...(options.persona === undefined
+              ? {}
+              : { persona: options.persona }),
+            ...(options.executePlan === undefined
+              ? {}
+              : { executePlan: options.executePlan }),
+            context: {
+              recent: built.context.recent,
+              os: built.context.os,
+              term: built.context.term,
+            },
+          },
+        );
+    if (options.controller.signal.aborted) onAbort();
+    const started = await Promise.race([request, controlled]);
+    if ("exit" in started) return started;
+    if (options.attach && (started as TurnAttachResult).following !== true)
+      throw new PrefaixError(
+        "UNSUPPORTED",
+        "this daemon cannot follow an attached turn; restart it after upgrading",
+      );
+    conversationId = started.conversationId ?? args.conversationId;
+    turnId = started.turnId;
+    acknowledged = true;
+    options.setTurnId(turnId);
+    options.setConversationId(conversationId);
+    if (options.controller.signal.aborted) onAbort();
+    if (options.detach.aborted) onDetach();
+    const outcome = await Promise.race([ended, controlled]);
     if ("exit" in outcome) return outcome;
-    const summary = outcome;
-    // Keep the authoritative proposal private until client metadata and tty
-    // cleanup succeed too. Early editor UI/tool buffers remain ignored.
     return {
       conversationId,
-      exit: exitForSummary(summary),
+      exit: exitForSummary(outcome),
       ...((options.edit !== undefined || options.attach) &&
-      summary.status === "stop" &&
-      summary.buffer !== undefined
+      outcome.status === "stop" &&
+      outcome.buffer !== undefined
         ? {
-            buffer: summary.buffer,
-            ...(summary.stagedDiffHash === undefined
+            buffer: outcome.buffer,
+            ...(outcome.stagedDiffHash === undefined
               ? {}
-              : { stagedDiffHash: summary.stagedDiffHash }),
+              : { stagedDiffHash: outcome.stagedDiffHash }),
           }
         : {}),
     };
   } finally {
     finished = true;
-    removeDetach();
+    options.detach.removeEventListener("abort", onDetach);
     options.controller.signal.removeEventListener("abort", onAbort);
     client.onClose(() => undefined);
   }

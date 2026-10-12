@@ -10,7 +10,9 @@ import type { AgentEvent, ModelInfo, ShellKind } from "./agent-port.js";
 import type { ErrorInfo } from "./errors.js";
 
 /** Bumped only on a breaking wire change (DESIGN §13). */
-export const PROTOCOL_VERSION = 1;
+// v1 daemons silently discard the new commit/detach operations. Reject them
+// during hello, before the foreground enters raw mode or issues either RPC.
+export const PROTOCOL_VERSION = 2;
 
 export type ShellVersionInfo = {
   kind: ShellKind;

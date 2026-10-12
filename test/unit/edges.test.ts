@@ -12,6 +12,7 @@ import {
 } from "../../src/core/config/schema.js";
 import { resolvePaths, type PrefaixPaths } from "../../src/core/paths.js";
 import { EXIT } from "../../src/core/errors.js";
+import { PROTOCOL_VERSION } from "../../src/core/protocol.js";
 import { MarkdownStream, styleOnce } from "../../src/client/render/styler.js";
 import { capabilities } from "../../src/client/render/theme.js";
 import { Renderer } from "../../src/client/render/renderer.js";
@@ -115,14 +116,16 @@ describe("the socket, driven by hand", () => {
       },
     );
     socket.setEncoding("utf8");
-    socket.write('{"t":"hello","v":1,"version":"x","pid":1}\n');
+    socket.write(
+      `{"t":"hello","v":${PROTOCOL_VERSION},"version":"x","pid":1}\n`,
+    );
     await new Promise((resolve) => setTimeout(resolve, 30));
     socket.destroy();
     // The daemon is still there for the next client, which is the point of the
     // close handler being a cleanup rather than a shutdown.
     const client = await TestClient.open(paths.socket);
     await client.waitFor((message) => message.t === "hello");
-    expect(client.hello?.v).toBe(1);
+    expect(client.hello?.v).toBe(PROTOCOL_VERSION);
     client.close();
   });
 
@@ -207,7 +210,9 @@ describe("the handshake a client can get wrong", () => {
       socket.once("connect", resolve);
       socket.once("error", reject);
     });
-    socket.write('{"t":"hello","v":1,"version":"0.0.0-test","pid":7}\n');
+    socket.write(
+      `{"t":"hello","v":${PROTOCOL_VERSION},"version":"0.0.0-test","pid":7}\n`,
+    );
     socket.write('{"t":"gossip","payload":{"anything":true}}\n');
     const status = await client.call<{ backend: string }>("status.get", {});
     expect(status.backend).toBe("fake");
@@ -228,7 +233,9 @@ describe("the handshake a client can get wrong", () => {
       socket.once("connect", resolve);
       socket.once("error", reject);
     });
-    socket.write('{"t":"hello","v":1,"version":"0.0.0-test","pid":7}\n');
+    socket.write(
+      `{"t":"hello","v":${PROTOCOL_VERSION},"version":"0.0.0-test","pid":7}\n`,
+    );
     // A response with an id nobody asked about is not this client's to act on.
     socket.write('{"t":"res","id":"r999","ok":true}\n');
     const status = await client.call<{ backend: string }>("status.get", {});
@@ -273,7 +280,7 @@ describe("the handshake a client can get wrong", () => {
         connection.write("not json at all\n");
         connection.write(`{"t":"res","id":"r-nobody-asked","ok":true}\n`);
         connection.write(
-          `{"t":"hello","v":1,"version":"${VERSION}","pid":7}\n`,
+          `{"t":"hello","v":${PROTOCOL_VERSION},"version":"${VERSION}","pid":7}\n`,
         );
         setTimeout(() => connection.end(), 20);
       });

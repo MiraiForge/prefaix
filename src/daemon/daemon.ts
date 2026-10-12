@@ -21,11 +21,12 @@ import { tryLock, type LockHandle } from "./lock.js";
 import { TurnManager, type TurnHandle } from "./turns.js";
 import { Operations } from "./operations.js";
 import { Router, SocketServer, type Connection } from "./server.js";
-import type {
-  ClientMessage,
-  OperationName,
-  TurnSummary,
-  TurnStartParams,
+import {
+  PROTOCOL_VERSION,
+  type ClientMessage,
+  type OperationName,
+  type TurnSummary,
+  type TurnStartParams,
 } from "../core/protocol.js";
 
 export const DEFAULT_IDLE_MINUTES = 30;
@@ -292,7 +293,7 @@ export class Daemon {
       case "turn.detach":
         return this.#ops.turnDetach(params as never, connection);
       case "turn.abort":
-        return this.#ops.turnAbort(params as never);
+        return this.#ops.turnAbort(params as never, connection);
       case "turn.attach":
         return this.#ops.turnAttach(params as never, connection);
       case "conv.rm":
@@ -328,7 +329,11 @@ export class Daemon {
       case "status.get":
         return this.#ops.statusGet(params as never);
       case "daemon.ping":
-        return { version: this.#version, pid: process.pid, v: 1 };
+        return {
+          version: this.#version,
+          pid: process.pid,
+          v: PROTOCOL_VERSION,
+        };
       case "daemon.stop":
         // Answer first, then exit: a client waiting on this response must not
         // see a closed socket instead of an acknowledgement.
