@@ -33,7 +33,7 @@ import {
   toolSummary,
 } from "./tool-summaries.js";
 import { parseCommandProposal } from "../../core/command-proposal.js";
-import { PROPOSE_COMMAND } from "./command-proposal.js";
+import { PROPOSE_COMMAND, PROPOSE_COMMIT } from "./command-proposal.js";
 
 type DialogMethod = "select" | "confirm" | "input" | "editor";
 
@@ -48,6 +48,7 @@ const UI_KINDS: Readonly<Record<DialogMethod, UiRequestKind>> = {
 
 export interface MapperOptions {
   readonly commandProposals?: boolean;
+  readonly commitProposals?: boolean;
   /** Minimum gap between tool_update events, per DESIGN §4.5.3. */
   readonly toolUpdateThrottleMs?: number;
   /**
@@ -134,6 +135,7 @@ export class TurnMapper {
   constructor(options: MapperOptions = {}) {
     this.#options = {
       commandProposals: options.commandProposals ?? false,
+      commitProposals: options.commitProposals ?? false,
       toolUpdateThrottleMs: options.toolUpdateThrottleMs ?? 100,
       usageThrottleMs: options.usageThrottleMs ?? 250,
       now: options.now ?? (() => Date.now()),
@@ -271,7 +273,8 @@ export class TurnMapper {
       if (
         this.#options.commandProposals &&
         !isError &&
-        tool?.name === PROPOSE_COMMAND &&
+        tool?.name ===
+          (this.#options.commitProposals ? PROPOSE_COMMIT : PROPOSE_COMMAND) &&
         !id.includes("/")
       ) {
         const proposal = parseCommandProposal(

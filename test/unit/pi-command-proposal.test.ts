@@ -37,17 +37,19 @@ afterEach(() => {
   delete process.env[BRIDGE_DIR_ENV];
   rmSync(dir, { recursive: true, force: true });
 });
-function fake() {
+function fake(failCommitRegistration = false) {
   const handlers = new Map<string, (event: never) => unknown>();
   let tools = ["read", "bash"];
-  let proposal: ProposalTool | undefined;
+  const registered = new Map<string, ProposalTool>();
   let failing = false;
   const pi = {
     on(name: string, handler: (event: never) => unknown) {
       handlers.set(name, handler);
     },
     registerTool(tool: ProposalTool) {
-      proposal = tool;
+      if (failCommitRegistration && tool.name === "propose_commit")
+        throw new Error("commit registration failed");
+      registered.set(tool.name, tool);
       tools.push(tool.name);
     },
     setActiveTools(names: string[]) {
@@ -65,7 +67,8 @@ function fake() {
   return {
     pi,
     fire,
-    proposal: () => proposal!,
+    proposal: () => registered.get("propose_command")!,
+    registered,
     failing: () => {
       failing = true;
     },
@@ -75,11 +78,13 @@ function begin(
   f: ReturnType<typeof fake>,
   edit: boolean,
   persona?: { name: string; tools: string[] },
+  commitStyle?: string,
 ) {
   writeTurnContext(turnContextFile(dir, 123), {
     version: BRIDGE_VERSION,
     context,
     commandProposal: edit,
+    ...(commitStyle === undefined ? {} : { commitStyle }),
     ...(persona === undefined ? {} : { persona }),
   });
   const sections: Record<string, string> = {};
@@ -301,15 +306,18 @@ it.each(["", " \r\n\u001b\u0007\u009b\u2028 "])(
   },
 );
 
-async function adapter(ready: "supported" | "legacy" | "malformed" | "absent") {
+async function adapter(
+  ready: "supported" | "legacy" | "malformed" | "absent",
+  commit = false,
+) {
   const root = fileURLToPath(new URL("../../", import.meta.url));
   const fixture = join(dir, "proposal.jsonl");
   writeFileSync(
     fixture,
     [
       { type: "agent_start" },
-      start,
-      end,
+      { ...start, toolName: commit ? "propose_commit" : start.toolName },
+      { ...end, toolName: commit ? "propose_commit" : end.toolName },
       { type: "agent_end" },
       { type: "agent_settled" },
     ]
@@ -328,7 +336,10 @@ async function adapter(ready: "supported" | "legacy" | "malformed" | "absent") {
         file,
         ready === "malformed"
           ? "broken"
-          : JSON.stringify({ commandProposals: ready === "supported" }),
+          : JSON.stringify({
+              commandProposals: ready === "supported",
+              commitProposals: commit && ready === "supported",
+            }),
       );
       return true;
     },
@@ -345,6 +356,96 @@ async function adapter(ready: "supported" | "legacy" | "malformed" | "absent") {
   const session = (await agent.open({ root, env: {} })) as PiSession;
   return { session, trace, contextFile };
 }
+it("keeps suggestions usable if commit tool registration fails", () => {
+  const f = fake(true);
+  const ready = JSON.parse(readFileSync(bridgeReadyFile(dir, 123), "utf8"));
+  expect(ready.commandProposals).toBe(true);
+  expect(ready.commitProposals).toBeUndefined();
+  begin(f, true);
+  expect(f.pi.getActiveTools()).toEqual(["propose_command"]);
+  expect(() => begin(f, true, undefined, "Conventional Commits")).toThrow(
+    /unavailable/,
+  );
+  expect(f.fire("tool_call", { toolName: "bash" })).toMatchObject({
+    block: true,
+  });
+});
+
+it("activates commit-only tools, forwards style, blocks cross-mode calls, and restores ordinary tools", () => {
+  const f = fake();
+  expect(
+    JSON.parse(readFileSync(bridgeReadyFile(dir, 123), "utf8")),
+  ).toMatchObject({ commitProposals: true });
+  const sections = begin(f, true, undefined, "Conventional Commits");
+  expect(f.pi.getActiveTools()).toEqual(["propose_commit"]);
+  expect(sections.suggest).toContain("Conventional Commits");
+  expect(
+    f.fire("tool_call", { toolName: "propose_command", toolCallId: "x" }),
+  ).toMatchObject({ block: true });
+  expect(
+    f.fire("tool_call", { toolName: "propose_commit", toolCallId: "x/0" }),
+  ).toMatchObject({ block: true });
+  expect(
+    f.fire("tool_call", { toolName: "propose_commit", toolCallId: "x" }),
+  ).toBeUndefined();
+  expect(
+    f.registered
+      .get("propose_commit")!
+      .execute("x", { message: "feat: add tests", explanation: "" }).details
+      .command,
+  ).toBe("git commit -m 'feat: add tests'");
+  expect(() =>
+    f.proposal().execute("x", { command: "evil", explanation: "" }),
+  ).toThrow();
+  f.fire("agent_settled");
+  expect(f.pi.getActiveTools()).toEqual(["read", "bash"]);
+  begin(f, true);
+  expect(f.fire("tool_call", { toolName: "propose_commit" })).toMatchObject({
+    block: true,
+  });
+});
+it.each([true, false])(
+  "negotiates per-child commit support %s before any prompt",
+  async (supported) => {
+    const { session, trace, contextFile } = await adapter(
+      "supported",
+      supported,
+    );
+    try {
+      const events: AgentEvent[] = [];
+      for await (const event of session.prompt(
+        {
+          text: "/literal-hint",
+          context,
+          commandProposal: true,
+          commitStyle: "Conventional Commits",
+        },
+        new AbortController().signal,
+      )) {
+        events.push(event);
+        if (supported && event.type === "turn_start")
+          expect(JSON.parse(readFileSync(contextFile, "utf8"))).toMatchObject({
+            commitStyle: "Conventional Commits",
+            commandProposal: true,
+          });
+      }
+      const commands = readFileSync(trace, "utf8");
+      if (supported) {
+        expect(commands).toContain("Request for a commit message:");
+        expect(events).toContainEqual({ type: "set_buffer", text: "echo x" });
+      } else {
+        expect(commands).not.toContain('"type":"prompt"');
+        expect(events.at(-1)).toMatchObject({
+          type: "settled",
+          stopReason: "error",
+        });
+      }
+    } finally {
+      await session.close();
+    }
+  },
+);
+
 it.each(["supported", "legacy", "malformed", "absent"] as const)(
   "scripted adapter negotiates %s proposal support without silently prompting",
   async (ready) => {

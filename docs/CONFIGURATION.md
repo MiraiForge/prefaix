@@ -41,6 +41,7 @@ lists use JSON arrays, and paths expand a leading `~`. Unknown keys are errors.
 | `personas.<name>.guideline` | optionalString | `null` | `PREFAIX_PERSONAS_<NAME>_GUIDELINE` |
 | `commands.suggest.model` | optionalString | `null` | `PREFAIX_COMMANDS_SUGGEST_MODEL` |
 | `commands.commit.max_diff_bytes` | integer (minimum 0) | `100000` | `PREFAIX_COMMANDS_COMMIT_MAX_DIFF_BYTES` |
+| `commands.commit.style` | string | `"Short imperative subject; explain non-obvious rationale in the body."` | `PREFAIX_COMMANDS_COMMIT_STYLE` |
 
 `personas.<name>` is an extensible table. The default `ask` and `plan` personas
 allow `read`, `grep`, `find`, and `ls`; ask answers without editing, and plan
@@ -49,5 +50,8 @@ An environment override can alter an existing persona but cannot introduce one.
 
 `null` means unset. `PREFAIX_PLAIN=1` disables styling. Shell identity, live-test
 settings, and `PREFAIX_FAKE_SCENARIO` are runtime controls, not TOML settings.
-Some settings prepare later milestones: `commands.suggest`, `commands.commit`,
-and `ui.set_title` do not enable those M4 features in the M3 build.
+`commands.suggest.model` selects a temporary suggestion model.
+`commands.commit.max_diff_bytes` caps staged diff input; `commands.commit.style`
+guides commit-message drafting (for example, Conventional Commits).
+Some settings prepare later milestones: `ui.set_title` does not yet enable
+terminal title updates.

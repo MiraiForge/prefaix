@@ -9,7 +9,7 @@
 
 import { PrefaixError } from "../core/errors.js";
 import { newTurnId } from "../core/ids.js";
-import type { AgentEvent } from "../core/agent-port.js";
+import type { AgentEvent, ShellKind } from "../core/agent-port.js";
 import type { TurnSummary } from "../core/protocol.js";
 
 export const DEFAULT_RING_BYTES = 4 * 1024 * 1024;
@@ -99,11 +99,17 @@ export interface TurnHandle {
   readonly id: string;
   readonly conversationId: string;
   readonly shellId: string;
+  readonly shellKind?: ShellKind;
   readonly ring: EventRing;
   readonly controller: AbortController;
   owner: TurnOwner;
   startedAt: number;
   finished: boolean;
+  /** Finalization has begun; detaching now must not publish stale running status. */
+  finishing: boolean;
+  readonly edit?: "suggest" | "commit";
+  readonly statusShells: Set<string>;
+  detachStatus: Promise<void>;
   buffer: string;
   summary: TurnSummary | undefined;
   onDisconnect: "abort" | "continue";
@@ -127,8 +133,10 @@ export interface TurnManagerOptions {
 export interface StartTurnOptions {
   readonly conversationId: string;
   readonly shellId: string;
+  readonly shellKind?: ShellKind;
   readonly promptText?: string;
   readonly onDisconnect?: "abort" | "continue";
+  readonly edit?: "suggest" | "commit";
 }
 
 export class TurnManager {
@@ -194,11 +202,18 @@ export class TurnManager {
       id: newTurnId(),
       conversationId: options.conversationId,
       shellId: options.shellId,
+      ...(options.shellKind === undefined
+        ? {}
+        : { shellKind: options.shellKind }),
       ring: new EventRing(this.#ringBytes),
       controller: new AbortController(),
       owner: "attached",
       startedAt: this.#now(),
       finished: false,
+      finishing: false,
+      ...(options.edit === undefined ? {} : { edit: options.edit }),
+      statusShells: new Set([options.shellId]),
+      detachStatus: Promise.resolve(),
       buffer: "",
       summary: undefined,
       onDisconnect: options.onDisconnect ?? "abort",
@@ -281,11 +296,11 @@ export class TurnManager {
       turn.owner = "detached";
       return false;
     }
-    this.#turns.delete(turn.id);
     if (turn.onDisconnect === "continue") {
       turn.owner = "detached";
       return false;
     }
+    this.#turns.delete(turn.id);
     turn.controller.abort();
     return true;
   }

@@ -33,6 +33,7 @@ function boundary(regex, message) {
 export default defineConfig([
   globalIgnores([
     "dist/**",
+    "build/**",
     "coverage/**",
     ".beads/**",
     ".agents/**",

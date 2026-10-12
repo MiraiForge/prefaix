@@ -461,6 +461,117 @@ describe("a turn whose agent breaks", () => {
   });
 });
 
+describe("following ownership and replay boundaries", () => {
+  it("catches up from the bounded ring while live events and settlement arrive under backpressure", async () => {
+    const live = new TurnManager({ ringBytes: 128 });
+    const turn = live.start({ conversationId: "live", shellId: "1-1-a" });
+    live.publish(turn, { type: "turn_start" });
+    live.publish(turn, { type: "text_delta", block: 0, text: "first" });
+    const drained = gate();
+    let blocked = true;
+    const owner: Connection = {
+      ...connection("follow"),
+      waitWritable: () => (blocked ? drained.promise : undefined),
+    };
+    const ops = operations({ turns: live });
+    const pending = ops.turnAttach(
+      { conversationId: "live", fromSeq: 1, follow: true },
+      owner,
+    );
+    await expect(
+      ops.turnAttach(
+        { conversationId: "live", fromSeq: 1, follow: true },
+        connection("other"),
+      ),
+    ).rejects.toThrow(/replaying/);
+    ops.publish(turn, {
+      type: "text_delta",
+      block: 0,
+      text: "later".repeat(100),
+    });
+    ops.publish(turn, { type: "settled", stopReason: "stop" });
+    live.finish(turn, { turnId: turn.id, status: "stop" });
+    blocked = false;
+    drained.open();
+    expect(await pending).toMatchObject({
+      turnId: turn.id,
+      following: true,
+      fromSeq: 1,
+    });
+    expect(sent.flatMap((m) => (m.t === "evt" ? [m.seq] : []))).toEqual([
+      1, 2, 4,
+    ]);
+    expect(sent.filter((m) => m.t === "turn.end")).toHaveLength(1);
+  });
+  it("applies the disconnect policy when a following reader closes during replay", async () => {
+    const live = new TurnManager();
+    const turn = live.start({ conversationId: "live", shellId: "1-1-a" });
+    live.publish(turn, { type: "turn_start" });
+    const drained = gate();
+    let closed = false;
+    const owner: Connection = {
+      ...connection("follow"),
+      get closed() {
+        return closed;
+      },
+      waitWritable: () => drained.promise,
+    };
+    const pending = operations({ turns: live }).turnAttach(
+      { conversationId: "live", fromSeq: 1, follow: true },
+      owner,
+    );
+    closed = true;
+    drained.open();
+    await pending;
+    expect(turn.controller.signal.aborted).toBe(true);
+  });
+  it("refuses detach during finalization rather than writing stale running status", async () => {
+    const ops = operations();
+    const started = await startTurn(ops);
+    const turn = turns.get(started.turnId)!;
+    turn.finishing = true;
+    await expect(
+      ops.turnDetach({ turnId: started.turnId }, connection("c1")),
+    ).rejects.toThrow(/already finishing/);
+    expect(turn.owner).toBe("attached");
+    turn.finishing = false;
+    await settleTurn(started.turnId);
+  });
+  it("waits for a pending detached-status write before final outcome publication", async () => {
+    const status = gate();
+    const ops = operations({ onDetach: () => status.promise });
+    const started = await startTurn(ops);
+    const detached = ops.turnDetach(
+      { turnId: started.turnId },
+      connection("c1"),
+    );
+    for (const session of backend.sessions) session.flush();
+    await vi.waitFor(() =>
+      expect(turns.get(started.turnId)?.finishing).toBe(true),
+    );
+    expect(ended).toEqual([]);
+    status.open();
+    expect(await detached).toEqual(started);
+    await settleTurn(started.turnId);
+  });
+  it("keeps a detached turn usable if publishing its status fails", async () => {
+    const log = vi.fn();
+    const ops = operations({
+      onDetach: async () => {
+        throw new Error("status failed");
+      },
+      log,
+    });
+    const started = await startTurn(ops);
+    await ops.turnDetach({ turnId: started.turnId }, connection("c1"));
+    expect(log).toHaveBeenCalledWith("could not publish detached status", {
+      cause: "status failed",
+    });
+    expect(turns.get(started.turnId)?.owner).toBe("detached");
+    await settleTurn(started.turnId);
+  });
+});
+
 describe("a client that goes away mid-turn", () => {
   it("keeps replay metadata consistent when the live ring changes while the reader waits", async () => {
     const live = new TurnManager({ ringBytes: 128 });

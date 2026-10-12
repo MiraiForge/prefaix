@@ -3,6 +3,7 @@
 // every turn is byte-for-byte predictable.
 
 import { ulid } from "../../core/ids.js";
+import { commitCommand } from "../../core/commit-proposal.js";
 import { PrefaixError } from "../../core/errors.js";
 import type {
   AgentBackend,
@@ -224,7 +225,16 @@ export class FakeSession implements AgentSession {
               text: "Review this fake command before pressing Enter.",
             },
             { type: "text_end", block: 0 },
-            { type: "set_buffer", text: this.#commandProposal },
+            {
+              type: "set_buffer",
+              text:
+                input.commitStyle === undefined
+                  ? this.#commandProposal
+                  : commitCommand(
+                      "feat: draft staged changes",
+                      input.context.shell.kind,
+                    ),
+            },
           ]
         : this.#scenario;
     for (const step of steps) {

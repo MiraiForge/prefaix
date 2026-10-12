@@ -1,9 +1,27 @@
 import { shellRuntimeFiles, type PrefaixPaths } from "./paths.js";
 
 let sequence = 0;
+const writes = new Map<string, Promise<void>>();
 
 /** The daemon and foreground publish the same data-only prompt cache. */
 export async function writeShellStatus(
+  paths: PrefaixPaths,
+  shellId: string,
+  text: string,
+): Promise<void> {
+  const { status } = shellRuntimeFiles(paths, shellId);
+  const writing = (writes.get(status) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(() => writeStatus(paths, shellId, text));
+  writes.set(status, writing);
+  const clear = () => {
+    if (writes.get(status) === writing) writes.delete(status);
+  };
+  void writing.then(clear, clear);
+  return writing;
+}
+
+async function writeStatus(
   paths: PrefaixPaths,
   shellId: string,
   text: string,

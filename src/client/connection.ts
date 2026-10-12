@@ -22,6 +22,8 @@ import type { PrefaixPaths } from "../core/paths.js";
 export const AUTOSPAWN_BUDGET_MS = 3_000;
 const FIRST_RETRY_MS = 25;
 const HELLO_TIMEOUT_MS = 2_000;
+const RESTART_DAEMON_HINT =
+  "Stop the old daemon with its original CLI, or terminate the PID recorded in daemon.lock, then retry.";
 const MAX_RETRY_MS = 200;
 
 export interface TurnEvent {
@@ -247,6 +249,16 @@ export class DaemonClient {
 
   #dispatch(message: DaemonMessage): void {
     if (message.t === "hello") {
+      if (message.v !== PROTOCOL_VERSION) {
+        this.#awaitingHello?.reject(
+          new PrefaixError(
+            "PROTOCOL_MISMATCH",
+            `this daemon speaks protocol v${String(message.v)}, the client requires v${String(PROTOCOL_VERSION)}`,
+            { hint: RESTART_DAEMON_HINT },
+          ),
+        );
+        return;
+      }
       this.#awaitingHello?.resolve({
         version: message.version,
         pid: message.pid,
@@ -257,7 +269,14 @@ export class DaemonClient {
       if (!message.ok && this.#awaitingHello !== undefined) {
         // A refusal during the handshake is fatal, and it is answered before
         // the socket closes, so it is read here rather than lost.
-        this.#awaitingHello.reject(PrefaixError.fromInfo(message.error));
+        const refusal = PrefaixError.fromInfo(message.error);
+        this.#awaitingHello.reject(
+          refusal.code === "PROTOCOL_MISMATCH"
+            ? new PrefaixError(refusal.code, refusal.message, {
+                hint: RESTART_DAEMON_HINT,
+              })
+            : refusal,
+        );
         return;
       }
       const pending = this.#pending.get(message.id);

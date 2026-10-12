@@ -133,6 +133,8 @@ export interface PromptInput {
   persona?: PersonaSpec;
   /** A structured, non-executing edit turn; never changes the saved persona. */
   commandProposal?: boolean;
+  /** Commit-message proposal tooling instead of arbitrary command tooling. */
+  commitStyle?: string;
 }
 
 export type UiResponse =

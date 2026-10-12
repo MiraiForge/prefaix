@@ -16,9 +16,10 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { shellHintsFile } from "../core/paths.js";
+import { shellHintsFile, shellRuntimeFiles } from "../core/paths.js";
 import { PrefaixError, unsupported, messageOf } from "../core/errors.js";
 import { parseCommandProposal } from "../core/command-proposal.js";
+import { commitMessage } from "../core/commit-proposal.js";
 import { newRecord, summarize, titleFrom } from "./store.js";
 import type { ConversationRecord, ConversationStore } from "./store.js";
 import type {
@@ -48,6 +49,10 @@ import type {
   ThinkingSetParams,
   TurnStartParams,
   TurnStartResult,
+  TurnAbortParams,
+  TurnAttachParams,
+  TurnAttachResult,
+  TurnDetachResult,
   TurnSummary,
   UiRespondParams,
 } from "../core/protocol.js";
@@ -112,6 +117,7 @@ export interface OpsOptions {
     info: { root: string; env: Record<string, string> },
   ) => void | Promise<void>;
   readonly log?: (message: string, fields?: Record<string, unknown>) => void;
+  readonly onDetach?: (turn: TurnHandle) => Promise<void>;
 }
 
 export class Operations {
@@ -119,6 +125,8 @@ export class Operations {
   /** turn id -> the connection that owns it, so a close knows what to abort. */
   readonly #owned = new Map<string, Connection>();
   readonly #pending = new Set<Promise<unknown>>();
+  /** Live events remain in the bounded ring while ownership replay catches up. */
+  readonly #replaying = new Set<string>();
   #closing = false;
 
   constructor(options: OpsOptions) {
@@ -166,6 +174,7 @@ export class Operations {
       const turn = this.#options.turns.get(turnId);
       if (turn !== undefined) {
         this.#options.turns.release(turn, "close");
+        if (turn.owner === "detached") this.#detached(turn);
       }
     }
   }
@@ -178,7 +187,7 @@ export class Operations {
   publish(turn: TurnHandle, event: AgentEvent): number {
     const seq = this.#options.turns.publish(turn, event);
     const owner = this.#owned.get(turn.id);
-    if (owner !== undefined && !owner.closed) {
+    if (owner !== undefined && !owner.closed && !this.#replaying.has(turn.id)) {
       this.#options.send(owner, { t: "evt", turnId: turn.id, seq, e: event });
     }
     return seq;
@@ -341,10 +350,67 @@ export class Operations {
    * and what `:attach` will read; it works on a finished turn as well as a
    * running one, because the ring survives the turn.
    */
-  async turnAttach(
-    params: { conversationId?: string; fromSeq: number },
+  async turnDetach(
+    params: { turnId: string },
     connection: Connection,
-  ): Promise<{ turnId: string; fromSeq: number }> {
+  ): Promise<TurnDetachResult> {
+    const turn = this.#options.turns.get(params.turnId);
+    if (turn === undefined || turn.finishing)
+      throw new PrefaixError(
+        "CONVERSATION_NOT_FOUND",
+        "the turn is already finishing or no longer running",
+      );
+    if (this.#owned.get(turn.id)?.id !== connection.id)
+      throw new PrefaixError(
+        "USAGE",
+        "only the owning foreground client can detach this turn",
+      );
+    if (turn.edit !== undefined)
+      throw new PrefaixError(
+        "UNSUPPORTED",
+        "edit turns cannot detach; review or cancel the proposal here",
+      );
+    this.#owned.delete(turn.id);
+    this.#options.turns.release(turn, "detach");
+    this.#detached(turn);
+    await turn.detachStatus;
+    return { turnId: turn.id, conversationId: turn.conversationId };
+  }
+
+  #detached(turn: TurnHandle): void {
+    for (const id of [...turn.dialogs]) this.#cancelDialog(turn, id);
+    if (!turn.finishing)
+      turn.detachStatus = turn.detachStatus
+        .then(() => this.#options.onDetach?.(turn))
+        .catch((cause) => {
+          this.#options.log?.("could not publish detached status", {
+            cause: messageOf(cause),
+          });
+        });
+  }
+
+  #cancelDialog(turn: TurnHandle, id: string): void {
+    try {
+      this.#options.pool
+        .session(turn.conversationId)
+        ?.respondUi(id, { cancelled: true });
+    } catch {
+      // A backend that cannot answer has to stop rather than wait unowned forever.
+      turn.controller.abort();
+    }
+    turn.answered.add(id);
+    this.#options.turns.closeDialog(turn, id);
+    this.publish(turn, {
+      type: "notice",
+      level: "info",
+      text: "dialog cancelled while the turn is detached",
+    });
+  }
+
+  async turnAttach(
+    params: TurnAttachParams,
+    connection: Connection,
+  ): Promise<TurnAttachResult> {
     const conversationId = params.conversationId;
     if (conversationId === undefined || conversationId === "") {
       throw new PrefaixError(
@@ -361,33 +427,108 @@ export class Operations {
         { hint: "Run a `:` in that shell first." },
       );
     }
-    // The replay goes to the socket that asked for it, not to whoever owned the
-    // turn: the point of attaching is that the original client is gone.
-    const from = Math.max(1, params.fromSeq);
+    if (!Number.isSafeInteger(params.fromSeq) || params.fromSeq < 0)
+      throw new PrefaixError(
+        "USAGE",
+        "fromSeq must be a nonnegative safe integer",
+      );
+    if (params.follow === true) {
+      if (this.#replaying.has(turn.id))
+        throw new PrefaixError(
+          "CONVERSATION_BUSY",
+          "another client is replaying this turn",
+        );
+      const owner = this.#owned.get(turn.id);
+      if (
+        !turn.finished &&
+        owner !== undefined &&
+        !owner.closed &&
+        owner.id !== connection.id
+      )
+        throw new PrefaixError(
+          "CONVERSATION_BUSY",
+          "this turn is still attached to another foreground client",
+        );
+      if (!turn.finished && turn.edit !== undefined)
+        throw new PrefaixError(
+          "UNSUPPORTED",
+          "running edit turns cannot be attached from another client",
+        );
+      if (
+        turn.edit !== undefined &&
+        turn.shellKind !== undefined &&
+        params.shell !== undefined &&
+        turn.shellKind !== params.shell.kind
+      )
+        throw new PrefaixError(
+          "USAGE",
+          "edit proposals can only be replayed in their original shell",
+        );
+      if (params.shell !== undefined) {
+        shellRuntimeFiles(this.#options.store.paths, params.shell.shellId);
+        turn.statusShells.add(params.shell.shellId);
+      }
+      if (!turn.finished) {
+        this.#owned.set(turn.id, connection);
+        turn.owner = "attached";
+      }
+      this.#replaying.add(turn.id);
+    }
+    let cursor = Math.max(1, params.fromSeq);
     const oldestSeq = turn.ring.oldestSeq;
-    const summary = turn.summary;
-    for (const entry of turn.ring.since(from)) {
-      this.#options.send(connection, {
-        t: "evt",
-        turnId: turn.id,
-        seq: entry.seq,
-        e: entry.event,
-      });
-      const pending = connection.waitWritable?.();
-      if (pending !== undefined) await pending;
-      if (connection.closed) break;
+    const snapshotSummary = turn.summary;
+    try {
+      for (;;) {
+        const entries = turn.ring.since(cursor);
+        if (entries.length === 0) break;
+        for (const entry of entries) {
+          cursor = entry.seq + 1;
+          const answered =
+            params.follow === true &&
+            entry.event.type === "ui_request" &&
+            turn.answered.has(entry.event.id);
+          this.#options.send(connection, {
+            t: "evt",
+            turnId: turn.id,
+            seq: entry.seq,
+            e: answered
+              ? {
+                  type: "notice",
+                  level: "info",
+                  text: "previous dialog already answered or cancelled",
+                }
+              : entry.event,
+          });
+          const pending = connection.waitWritable?.();
+          if (pending !== undefined) await pending;
+          if (connection.closed) break;
+        }
+        if (params.follow !== true || connection.closed) break;
+      }
+      const summary = params.follow === true ? turn.summary : snapshotSummary;
+      if (summary !== undefined && !connection.closed)
+        this.#options.send(connection, {
+          t: "turn.end",
+          turnId: turn.id,
+          summary,
+        });
+    } finally {
+      if (params.follow === true) {
+        this.#replaying.delete(turn.id);
+        if (connection.closed) this.releaseConnection(connection);
+      }
     }
-    if (summary !== undefined && !connection.closed) {
-      this.#options.send(connection, {
-        t: "turn.end",
-        turnId: turn.id,
-        summary,
-      });
-    }
-    // The oldest sequence still held, so a client that asked to replay from
-    // further back can be told where the gap starts instead of being handed a
-    // stream with a hole in it.
-    return { turnId: turn.id, fromSeq: oldestSeq };
+    return {
+      turnId: turn.id,
+      fromSeq: oldestSeq,
+      ...(params.follow === true
+        ? {
+            following: true as const,
+            conversationId: turn.conversationId,
+            ...(turn.edit === undefined ? {} : { edit: turn.edit }),
+          }
+        : {}),
+    };
   }
 
   async convLastText(
@@ -440,12 +581,12 @@ export class Operations {
     this.#checkOpen();
     if (params.edit !== undefined) {
       if (
-        params.edit !== "suggest" ||
+        (params.edit !== "suggest" && params.edit !== "commit") ||
         params.executePlan === true ||
         params.persona !== undefined ||
-        params.text.trim() === ""
+        (params.edit === "suggest" && params.text.trim() === "")
       )
-        throw new PrefaixError("USAGE", "invalid suggest turn");
+        throw new PrefaixError("USAGE", "invalid edit turn");
       this.#options.pool.require("commandProposals");
     }
     if (params.edit === undefined && params.text.startsWith("/"))
@@ -497,7 +638,9 @@ export class Operations {
     const turn = this.#options.turns.start({
       conversationId: record.id,
       shellId: params.shell.shellId,
+      shellKind: params.shell.kind,
       promptText: params.text,
+      ...(params.edit === undefined ? {} : { edit: params.edit }),
       ...(params.onDisconnect === undefined
         ? {}
         : { onDisconnect: params.onDisconnect }),
@@ -651,9 +794,28 @@ export class Operations {
       error: "the turn ended without a settle",
     };
     let buffer: string | undefined;
+    let stagedDiffHash: string | undefined;
+    let text = params.text;
     let proposals = 0;
     let restoreState: AgentState | undefined;
     try {
+      if (params.edit === "commit") {
+        const { stagedDiff } = await import("../context/staged-diff.js");
+        const diff = await stagedDiff(
+          params.cwd,
+          params.env,
+          this.#options.config.commands.commit.maxDiffBytes,
+          turn.controller.signal,
+        );
+        stagedDiffHash = diff.hash;
+        text = `Draft a commit message from this JSON data:\n${JSON.stringify({ hint: params.text, stagedDiff: diff.text, truncated: diff.truncated })}`;
+        if (diff.truncated)
+          this.publish(turn, {
+            type: "notice",
+            level: "warn",
+            text: `staged diff truncated to ${String(this.#options.config.commands.commit.maxDiffBytes)} bytes; message may omit changes`,
+          });
+      }
       const model =
         params.edit === "suggest"
           ? this.#options.config.commands.suggest.model
@@ -686,8 +848,11 @@ export class Operations {
       }
       for await (const event of session.prompt(
         {
-          text: params.text,
-          ...(params.edit === "suggest" ? { commandProposal: true } : {}),
+          text,
+          ...(params.edit === undefined ? {} : { commandProposal: true }),
+          ...(params.edit === "commit"
+            ? { commitStyle: this.#options.config.commands.commit.style }
+            : {}),
           context: {
             shell: params.shell,
             cwd: params.cwd,
@@ -708,6 +873,10 @@ export class Operations {
         }
         if (event.type === "ui_request") {
           this.#options.turns.openDialog(turn, event.id);
+          if (turn.owner === "detached") {
+            this.#cancelDialog(turn, event.id);
+            continue;
+          }
         }
         if (params.edit !== undefined && event.type === "set_buffer") {
           proposals += 1;
@@ -715,6 +884,12 @@ export class Operations {
             command: event.text,
             explanation: "",
           })?.command;
+          if (
+            params.edit === "commit" &&
+            buffer !== undefined &&
+            commitMessage(buffer, params.shell.kind) === undefined
+          )
+            buffer = undefined;
           continue;
         }
         if (params.edit === undefined || event.type !== "settled")
@@ -800,7 +975,9 @@ export class Operations {
     }
     // Publish background status before releasing the foreground. Otherwise a
     // late daemon write can overwrite the client's final model/context status.
+    turn.finishing = true;
     try {
+      await turn.detachStatus;
       await this.#options.onEnd(turn, summary, {
         root: record.root,
         env: params.env,
@@ -821,7 +998,11 @@ export class Operations {
         if (turn.controller.signal.aborted)
           summary = { turnId: turn.id, status: "aborted" };
         if (summary.status === "stop" && buffer !== undefined) {
-          summary = { ...summary, buffer };
+          summary = {
+            ...summary,
+            buffer,
+            ...(stagedDiffHash === undefined ? {} : { stagedDiffHash }),
+          };
           this.publish(turn, { type: "set_buffer", text: buffer });
         }
         this.publish(turn, {
@@ -834,7 +1015,7 @@ export class Operations {
     }
     const owner = this.#owned.get(turn.id);
     this.#owned.delete(turn.id);
-    if (owner !== undefined && !owner.closed) {
+    if (owner !== undefined && !owner.closed && !this.#replaying.has(turn.id)) {
       this.#options.send(owner, { t: "turn.end", turnId: turn.id, summary });
     }
   }
@@ -901,14 +1082,32 @@ export class Operations {
     }
   }
 
-  async turnAbort(params: { turnId: string }): Promise<{ turnId: string }> {
-    const turn = this.#options.turns.get(params.turnId);
+  async turnAbort(
+    params: TurnAbortParams,
+    connection?: Connection,
+  ): Promise<{ turnId: string }> {
+    const turn =
+      params.turnId === undefined
+        ? this.#options.turns.runningFor(params.conversationId ?? "")
+        : this.#options.turns.get(params.turnId);
     if (turn === undefined) {
       throw new PrefaixError(
         "CONVERSATION_NOT_FOUND",
-        `no turn with id ${JSON.stringify(params.turnId)}`,
+        params.turnId === undefined
+          ? "no detached turn is running in this conversation"
+          : `no turn with id ${JSON.stringify(params.turnId)}`,
       );
     }
+    if (
+      params.turnId === undefined &&
+      turn.owner !== "detached" &&
+      (connection === undefined ||
+        this.#owned.get(turn.id)?.id !== connection.id)
+    )
+      throw new PrefaixError(
+        "CONVERSATION_BUSY",
+        "this turn is attached to another foreground client",
+      );
     this.#options.turns.abort(turn);
     return { turnId: turn.id };
   }

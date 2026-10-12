@@ -13,8 +13,12 @@
 
 import { appendFileSync, writeFileSync } from "node:fs";
 import { suggestGuideline } from "../../core/command-proposal.js";
+import { commitGuideline } from "../../core/commit-proposal.js";
+import type { ShellKind } from "../../core/agent-port.js";
 import {
   PROPOSE_COMMAND,
+  PROPOSE_COMMIT,
+  commitProposalTool,
   proposalTool,
   type ProposalTool,
 } from "./command-proposal.js";
@@ -69,11 +73,16 @@ function bridgeDir(): string | undefined {
  * trusting a turn context file, because an extension that failed to load would
  * leave context files unread and every turn silently context-free.
  */
-function announce(dir: string, pid: number, commandProposals: boolean): void {
+function announce(
+  dir: string,
+  pid: number,
+  commandProposals: boolean,
+  commitProposals: boolean,
+): void {
   try {
     writeFileSync(
       bridgeReadyFile(dir, pid),
-      `${JSON.stringify({ version: BRIDGE_VERSION, pid, ...(commandProposals ? { commandProposals: true } : {}) })}\n`,
+      `${JSON.stringify({ version: BRIDGE_VERSION, pid, ...(commandProposals ? { commandProposals: true } : {}), ...(commitProposals ? { commitProposals: true } : {}) })}\n`,
       { mode: 0o600 },
     );
   } catch {
@@ -109,20 +118,39 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
   let appliedPersona: string | undefined;
 
   let proposing = false;
+  let commitStyle: string | undefined;
+  let shell: ShellKind = "bash";
+  let commitRegistered = false;
   let proposalRegistered = false;
   let editPreviousTools: string[] | undefined;
   try {
     if (pi.registerTool !== undefined) {
-      pi.registerTool(proposalTool(() => proposing));
+      pi.registerTool(
+        proposalTool(() => proposing && commitStyle === undefined),
+      );
       proposalRegistered = true;
     }
   } catch {
-    // The ready file must not claim structured edits if registration failed.
+    // A failed tool registration must not claim readiness.
   }
-  if (dir !== undefined) announce(dir, pid, proposalRegistered);
+  try {
+    if (pi.registerTool !== undefined) {
+      pi.registerTool(
+        commitProposalTool(
+          () => proposing && commitStyle !== undefined,
+          () => shell,
+        ),
+      );
+      commitRegistered = true;
+    }
+  } catch {
+    // Commit support is independent; do not disable working suggestions.
+  }
+  if (dir !== undefined)
+    announce(dir, pid, proposalRegistered, commitRegistered);
   try {
     defaultTools = (pi.getActiveTools?.() ?? []).filter(
-      (name) => name !== PROPOSE_COMMAND,
+      (name) => name !== PROPOSE_COMMAND && name !== PROPOSE_COMMIT,
     );
   } catch {
     defaultTools = [];
@@ -133,8 +161,10 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
   pi.on("session_start", () => {
     try {
       const active = pi.getActiveTools?.() ?? defaultTools ?? [];
-      defaultTools = active.filter((name) => name !== PROPOSE_COMMAND);
-      if (active.includes(PROPOSE_COMMAND))
+      defaultTools = active.filter(
+        (name) => name !== PROPOSE_COMMAND && name !== PROPOSE_COMMIT,
+      );
+      if (active.includes(PROPOSE_COMMAND) || active.includes(PROPOSE_COMMIT))
         pi.setActiveTools([...defaultTools]);
     } catch {
       // Keep the best-effort load-time baseline if this API is unavailable.
@@ -151,8 +181,11 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
   pi.on("agent_settled", restoreEdit);
   pi.on("tool_call", (event) => {
     if (
-      (proposing && event.toolName !== PROPOSE_COMMAND) ||
-      (event.toolName === PROPOSE_COMMAND &&
+      (proposing &&
+        event.toolName !==
+          (commitStyle === undefined ? PROPOSE_COMMAND : PROPOSE_COMMIT)) ||
+      ((event.toolName === PROPOSE_COMMAND ||
+        event.toolName === PROPOSE_COMMIT) &&
         (!proposing || event.toolCallId?.includes("/")))
     )
       return {
@@ -182,6 +215,8 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
       restoreEdit();
     } finally {
       proposing = payload.commandProposal === true;
+      commitStyle = payload.commitStyle;
+      shell = payload.context.shell.kind;
     }
     const options_ = event.systemPromptOptions;
     if (options_ === undefined) {
@@ -193,19 +228,21 @@ export function createBridge(pi: BridgePi, options: { pid?: number } = {}) {
     const persona = payload.persona;
     delete options_.sections["suggest"];
     if (proposing) {
-      if (!proposalRegistered)
+      if (commitStyle === undefined ? !proposalRegistered : !commitRegistered)
         throw new Error("structured command proposals are unavailable");
+      const tool = commitStyle === undefined ? PROPOSE_COMMAND : PROPOSE_COMMIT;
       editPreviousTools = [...(pi.getActiveTools?.() ?? defaultTools ?? [])];
-      pi.setActiveTools([PROPOSE_COMMAND]);
+      pi.setActiveTools([tool]);
       if (
         pi.getActiveTools !== undefined &&
-        !sameTools(pi.getActiveTools(), [PROPOSE_COMMAND])
+        !sameTools(pi.getActiveTools(), [tool])
       )
-        throw new Error("could not activate propose_command exclusively");
+        throw new Error(`could not activate ${tool} exclusively`);
       delete options_.sections["persona"];
-      options_.sections["suggest"] = suggestGuideline(
-        payload.context.shell.kind,
-      );
+      options_.sections["suggest"] =
+        commitStyle === undefined
+          ? suggestGuideline(shell)
+          : commitGuideline(commitStyle);
     } else if (persona !== undefined) {
       const guideline = renderPersonaSection(persona);
       if (guideline !== undefined) {

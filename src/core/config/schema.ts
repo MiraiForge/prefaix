@@ -120,7 +120,7 @@ export interface PrefaixConfig {
   personas: Record<string, PersonaEntry>;
   commands: {
     suggest: { model: string | null };
-    commit: { maxDiffBytes: number };
+    commit: { maxDiffBytes: number; style: string };
   };
 }
 
@@ -252,6 +252,11 @@ export const CONFIG_SCHEMA: SectionNode = section({
     }),
     commit: section({
       max_diff_bytes: field("max_diff_bytes", "integer", 100_000, { min: 0 }),
+      style: field(
+        "style",
+        "string",
+        "Short imperative subject; explain non-obvious rationale in the body.",
+      ),
     }),
   }),
 });

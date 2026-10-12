@@ -10,7 +10,9 @@ import type { AgentEvent, ModelInfo, ShellKind } from "./agent-port.js";
 import type { ErrorInfo } from "./errors.js";
 
 /** Bumped only on a breaking wire change (DESIGN §13). */
-export const PROTOCOL_VERSION = 1;
+// v1 daemons silently discard the new commit/detach operations. Reject them
+// during hello, before the foreground enters raw mode or issues either RPC.
+export const PROTOCOL_VERSION = 2;
 
 export type ShellVersionInfo = {
   kind: ShellKind;
@@ -42,7 +44,7 @@ export interface TurnStartParams {
   /** Execute a completed plan in this exact conversation, with normal tools. */
   executePlan?: boolean;
   /** Structured edit output, held until this turn successfully finishes. */
-  edit?: "suggest";
+  edit?: "suggest" | "commit";
   context: TurnContextPayload;
   onDisconnect?: "abort" | "continue";
 }
@@ -51,7 +53,14 @@ export const PLAN_EXECUTION_PROMPT =
   "Execute the plan above. Use the normal tools to implement it.";
 
 export interface TurnAbortParams {
+  turnId?: string;
+  /** With no turn id, abort only this conversation's detached turn. */
+  conversationId?: string;
+}
+
+export interface TurnDetachResult {
   turnId: string;
+  conversationId: string;
 }
 
 export interface UiRespondParams {
@@ -69,6 +78,8 @@ export interface TurnSummary {
   turnId: string;
   status: "stop" | "aborted" | "error" | "length";
   error?: string;
+  /** Index snapshot used to draft a commit; checked again by explicit --run. */
+  stagedDiffHash?: string;
   usage?: {
     input: number;
     output: number;
@@ -123,6 +134,18 @@ export interface TurnAttachParams {
   conversationId?: string;
   /** Replay from this sequence; the daemon answers with the oldest it still has. */
   fromSeq: number;
+  /** Opt into ownership/live forwarding; omitted preserves snapshot debug tap. */
+  follow?: boolean;
+  shell?: ShellVersionInfo;
+}
+
+export interface TurnAttachResult {
+  turnId: string;
+  fromSeq: number;
+  /** An explicit handshake so old daemons cannot pretend to follow. */
+  following?: true;
+  conversationId?: string;
+  edit?: "suggest" | "commit";
 }
 
 export interface ConvLastTextParams {
@@ -187,11 +210,13 @@ export interface Operations {
   "turn.start": { params: TurnStartParams; result: TurnStartResult };
   /** Separate operation: old daemons must never treat an edit as a run turn. */
   "turn.suggest": { params: TurnStartParams; result: TurnStartResult };
+  "turn.commit": { params: TurnStartParams; result: TurnStartResult };
   "turn.abort": { params: TurnAbortParams; result: { turnId: string } };
+  "turn.detach": { params: { turnId: string }; result: TurnDetachResult };
   "ui.respond": { params: UiRespondParams; result: { ok: true } };
   "turn.attach": {
     params: TurnAttachParams;
-    result: { turnId: string; fromSeq: number };
+    result: TurnAttachResult;
   };
   "conv.new": { params: ConvNewParams; result: ConversationSummary };
   "conv.select": {
@@ -247,7 +272,9 @@ export type OperationName = keyof Operations;
 export const OPERATION_NAMES: readonly OperationName[] = [
   "turn.start",
   "turn.suggest",
+  "turn.commit",
   "turn.abort",
+  "turn.detach",
   "ui.respond",
   "turn.attach",
   "conv.new",

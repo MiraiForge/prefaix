@@ -44,10 +44,13 @@ import type {
   ModelListResult,
   StatusSnapshot,
   TurnSummary,
+  TurnAttachResult,
+  TurnDetachResult,
 } from "../core/protocol.js";
 import type { PickItem } from "./picker.js";
 import { copyText } from "./clipboard.js";
 import { plain } from "./process.js";
+import { commitMessage, parseCommitArgs } from "../core/commit-proposal.js";
 import {
   cacheCommands,
   cachedCommands,
@@ -299,6 +302,9 @@ export async function run(options: RunOptions): Promise<ExitCode> {
   let releaseGuards: (() => void) | undefined;
   let editBuffer: string | undefined;
   let editController: AbortController | undefined;
+  let directCommit = false;
+  let stagedDiffHash: string | undefined;
+  let preserveBackgroundStatus = false;
 
   try {
     await client.connect();
@@ -306,7 +312,8 @@ export async function run(options: RunOptions): Promise<ExitCode> {
     let text: string | undefined;
     let persona: string | undefined;
     let executePlan: boolean | undefined;
-    let edit: "suggest" | undefined;
+    let edit: "suggest" | "commit" | undefined;
+    let attach = false;
     let conversationId = args.conversationId;
     exit = EXIT.ok;
     if (parsed.kind === "command") {
@@ -326,6 +333,9 @@ export async function run(options: RunOptions): Promise<ExitCode> {
       text = result.text;
       executePlan = result.executePlan;
       edit = result.edit;
+      directCommit = result.directCommit ?? false;
+      attach = result.attach ?? false;
+      preserveBackgroundStatus = result.background ?? false;
     } else if (parsed.kind === "agent") {
       text = `/${parsed.name} ${parsed.args}`.trim();
     } else {
@@ -346,8 +356,15 @@ export async function run(options: RunOptions): Promise<ExitCode> {
     }
     if (text !== undefined) {
       const controller = new AbortController();
-      if (edit !== undefined) editController = controller;
-      tty = startTty(options, controller, renderer);
+      if (edit !== undefined || attach) editController = controller;
+      const detach = new AbortController();
+      tty = startTty(options, controller, renderer, () => {
+        if (edit !== undefined)
+          renderer.notice(
+            "edit turns cannot detach; review or cancel the proposal here",
+          );
+        else detach.abort();
+      });
       releaseGuards = installExitGuards(() => tty?.restore());
       tty.enter();
       renderer.begin();
@@ -368,10 +385,15 @@ export async function run(options: RunOptions): Promise<ExitCode> {
         ...(persona === undefined ? {} : { persona }),
         ...(executePlan === undefined ? {} : { executePlan }),
         ...(edit === undefined ? {} : { edit }),
+        attach,
+        detach: detach.signal,
       });
       exit = result.exit;
       conversationId = result.conversationId;
       editBuffer = result.buffer;
+      stagedDiffHash = result.stagedDiffHash;
+      preserveBackgroundStatus ||= result.detached === true;
+      if (result.detached) directives.status = "⟳ running";
     }
     if (conversationId !== "") {
       directives.conversation = conversationId;
@@ -380,23 +402,27 @@ export async function run(options: RunOptions): Promise<ExitCode> {
         shell: shellInfo(args),
         previousConversationId: args.conversationId,
       });
-      const status = await client.call<StatusSnapshot>("status.get", {
-        conversationId,
-      });
-      const commands = await client
-        .call<{ commands: AgentCommand[] }>("commands.list", { conversationId })
-        .catch(() => undefined);
-      if (commands !== undefined)
-        await cacheCommands(paths, conversationId, commands.commands);
-      directives.status = statusLabel({
-        ...status,
-        state:
-          exit === EXIT.aborted
-            ? "aborted"
-            : exit === EXIT.agentError
-              ? "error"
-              : status.state,
-      });
+      if (!preserveBackgroundStatus) {
+        const status = await client.call<StatusSnapshot>("status.get", {
+          conversationId,
+        });
+        const commands = await client
+          .call<{ commands: AgentCommand[] }>("commands.list", {
+            conversationId,
+          })
+          .catch(() => undefined);
+        if (commands !== undefined)
+          await cacheCommands(paths, conversationId, commands.commands);
+        directives.status = statusLabel({
+          ...status,
+          state:
+            exit === EXIT.aborted
+              ? "aborted"
+              : exit === EXIT.agentError
+                ? "error"
+                : status.state,
+        });
+      }
     }
   } catch (cause) {
     exit = cause instanceof PrefaixError ? cause.exitCode : EXIT.agentError;
@@ -414,11 +440,32 @@ export async function run(options: RunOptions): Promise<ExitCode> {
       exit = EXIT.aborted;
       directives.status = "prefaix · aborted";
     }
-    if (exit === EXIT.ok && editBuffer !== undefined)
-      renderer.handle({ type: "set_buffer", text: editBuffer });
+    if (exit === EXIT.ok && editBuffer !== undefined) {
+      if (directCommit) {
+        try {
+          await executeCommit(
+            editBuffer,
+            stagedDiffHash,
+            args,
+            filterEnv(env, config.env),
+            editController!.signal,
+            err,
+          );
+        } catch (cause) {
+          exit = editController?.signal.aborted
+            ? EXIT.aborted
+            : cause instanceof PrefaixError
+              ? cause.exitCode
+              : EXIT.agentError;
+          directives.status =
+            exit === EXIT.aborted ? "prefaix · aborted" : "prefaix · error";
+          err(`${messageOf(cause)}\n`);
+        }
+      } else renderer.handle({ type: "set_buffer", text: editBuffer });
+    }
     // Prompt hooks refresh from this file after applying the directives. The
     // foreground owns the final rich status once the daemon ends the turn.
-    if (directives.status !== undefined) {
+    if (directives.status !== undefined && !preserveBackgroundStatus) {
       await writeShellStatus(paths, args.shellId, directives.status).catch(
         () => undefined,
       );
@@ -431,6 +478,24 @@ export async function run(options: RunOptions): Promise<ExitCode> {
 
   await writeDirectives(args.directives, directives);
   return exit;
+}
+
+async function executeCommit(
+  buffer: string,
+  hash: string | undefined,
+  args: RunArgs,
+  env: Record<string, string>,
+  signal: AbortSignal,
+  err: (text: string) => void,
+): Promise<void> {
+  const message = commitMessage(buffer, args.shell);
+  if (message === undefined || hash === undefined)
+    throw new PrefaixError(
+      "AGENT_ERROR",
+      "the commit proposal has no valid message or index snapshot",
+    );
+  const { runCommit } = await import("../context/staged-diff.js");
+  await runCommit(args.cwd, env, message, hash, signal, err);
 }
 
 function footerFields(config: PrefaixConfig): FooterField[] {
@@ -461,10 +526,15 @@ function startTty(
   options: RunOptions,
   controller: AbortController,
   renderer: Renderer,
+  onDetach: () => void,
 ): TtyController {
   const tty = new TtyController({
     ...(options.tty === undefined ? {} : { input: options.tty }),
     onKey: (key) => {
+      if (key.name === "ctrl-z") {
+        onDetach();
+        return;
+      }
       if (
         key.name === "esc" ||
         key.name === "ctrl-c" ||
@@ -493,7 +563,9 @@ interface TurnOptions {
   readonly text: string;
   readonly persona?: string;
   readonly executePlan?: boolean;
-  readonly edit?: "suggest";
+  readonly edit?: "suggest" | "commit";
+  readonly attach?: boolean;
+  readonly detach: AbortSignal;
   readonly controller: AbortController;
   readonly setTurnId: (turnId: string) => void;
   readonly setConversationId: (conversationId: string) => void;
@@ -503,6 +575,8 @@ interface TurnRun {
   readonly exit: ExitCode;
   readonly conversationId: string;
   readonly buffer?: string;
+  readonly stagedDiffHash?: string;
+  readonly detached?: true;
 }
 
 async function runTurn(options: TurnOptions): Promise<TurnRun> {
@@ -533,61 +607,178 @@ async function runTurn(options: TurnOptions): Promise<TurnRun> {
     client.onClose(reject);
   });
   ended.catch(() => undefined);
-  client.onEvent((turnId, { event }) => {
-    options.setTurnId(turnId);
-    if (options.edit === undefined || event.type !== "set_buffer")
-      renderer.handle(event);
+  let lastSeq = 0;
+  let turnId: string | undefined;
+  let conversationId = args.conversationId;
+  let acknowledged = false;
+  let finished = false;
+  let detachRequested = false;
+  let abortSent = false;
+  let resolveControl!: (outcome: TurnRun) => void;
+  let rejectControl!: (cause: unknown) => void;
+  const controlled = new Promise<TurnRun>((resolve, reject) => {
+    resolveControl = resolve;
+    rejectControl = reject;
   });
-
-  const started = await client.call<{ turnId: string; conversationId: string }>(
-    options.edit === undefined ? "turn.start" : "turn.suggest",
-    {
-      ...(args.conversationId === ""
-        ? {}
-        : { conversationId: args.conversationId }),
-      shell: built.context.shell,
-      cwd: built.context.cwd,
-      env: built.agentEnv,
-      text: options.text,
-      ...(options.edit === undefined ? {} : { edit: options.edit }),
-      ...(options.persona === undefined ? {} : { persona: options.persona }),
-      ...(options.executePlan === undefined
-        ? {}
-        : { executePlan: options.executePlan }),
-      context: {
-        recent: built.context.recent,
-        os: built.context.os,
-        term: built.context.term,
-      },
-    },
-  );
-  options.setTurnId(started.turnId);
-  options.setConversationId(started.conversationId);
-
-  // Esc aborts locally and tells the daemon, so the turn ends even if the client
-  // dies on the way out.
   const onAbort = (): void => {
+    const params =
+      turnId === undefined
+        ? options.attach
+          ? { conversationId }
+          : undefined
+        : { turnId };
+    if (params !== undefined && !abortSent) {
+      abortSent = true;
+      void client.call("turn.abort", params).catch(() => undefined);
+    }
+    // A retained replay has no live turn to settle. Stop the local reader even
+    // while its attach response is backpressured; socket close releases replay.
+    if (options.attach) resolveControl({ exit: EXIT.aborted, conversationId });
+  };
+  const onDetach = (): void => {
+    if (
+      finished ||
+      detachRequested ||
+      turnId === undefined ||
+      (!acknowledged && !options.attach)
+    )
+      return;
+    detachRequested = true;
+    const id = turnId;
     void client
-      .call("turn.abort", { turnId: started.turnId })
-      .catch(() => undefined);
+      .call<TurnDetachResult>("turn.detach", { turnId: id })
+      .then((result) => {
+        if (finished) return;
+        if (
+          result?.turnId !== id ||
+          result?.conversationId !== conversationId
+        ) {
+          onAbort();
+          rejectControl(
+            new PrefaixError(
+              "UNSUPPORTED",
+              "the daemon did not acknowledge this turn's detach",
+            ),
+          );
+          return;
+        }
+        renderer.notice(
+          options.controller.signal.aborted
+            ? "detached turn abort requested"
+            : "turn detached; use :attach to watch it or :abort to stop it",
+        );
+        resolveControl({
+          exit: options.controller.signal.aborted ? EXIT.aborted : EXIT.ok,
+          conversationId,
+          detached: true,
+        });
+      })
+      .catch((cause) => {
+        if (finished) return;
+        if (
+          options.attach &&
+          cause instanceof PrefaixError &&
+          cause.code === "CONVERSATION_NOT_FOUND"
+        ) {
+          // The daemon explicitly confirms this retained/finalizing turn has
+          // no live work to detach. Closing our reader cancels replay, not work.
+          renderer.notice("replay stopped");
+          resolveControl({ exit: EXIT.ok, conversationId });
+        } else renderer.notice(`cannot detach: ${messageOf(cause)}`, "warn");
+      });
   };
   options.controller.signal.addEventListener("abort", onAbort, { once: true });
-
-  if (options.controller.signal.aborted) onAbort();
+  options.detach.addEventListener("abort", onDetach, { once: true });
+  client.onEvent((id, { seq, event }) => {
+    if (finished) return;
+    turnId = id;
+    options.setTurnId(id);
+    if (options.controller.signal.aborted) onAbort();
+    if (options.attach && options.detach.aborted) onDetach();
+    if (options.attach && options.controller.signal.aborted) return;
+    if (seq <= lastSeq) return;
+    if (options.attach && seq > lastSeq + 1)
+      renderer.notice(
+        "earlier turn output is no longer available; replay continues from the retained ring",
+        "warn",
+      );
+    lastSeq = seq;
+    if (
+      (options.edit === undefined && !options.attach) ||
+      event.type !== "set_buffer"
+    )
+      renderer.handle(event);
+  });
   try {
-    const summary = await ended;
-    // Keep the authoritative proposal private until client metadata and tty
-    // cleanup succeed too. Early editor UI/tool buffers remain ignored.
+    const request = options.attach
+      ? client.call<TurnAttachResult>("turn.attach", {
+          conversationId: args.conversationId,
+          fromSeq: 1,
+          follow: true,
+          shell: shellInfo(args),
+        })
+      : client.call<{ turnId: string; conversationId: string }>(
+          options.edit === undefined
+            ? "turn.start"
+            : options.edit === "commit"
+              ? "turn.commit"
+              : "turn.suggest",
+          {
+            ...(args.conversationId === ""
+              ? {}
+              : { conversationId: args.conversationId }),
+            shell: built.context.shell,
+            cwd: built.context.cwd,
+            env: built.agentEnv,
+            text: options.text,
+            ...(options.edit === undefined ? {} : { edit: options.edit }),
+            ...(options.persona === undefined
+              ? {}
+              : { persona: options.persona }),
+            ...(options.executePlan === undefined
+              ? {}
+              : { executePlan: options.executePlan }),
+            context: {
+              recent: built.context.recent,
+              os: built.context.os,
+              term: built.context.term,
+            },
+          },
+        );
+    if (options.controller.signal.aborted) onAbort();
+    const started = await Promise.race([request, controlled]);
+    if ("exit" in started) return started;
+    if (options.attach && (started as TurnAttachResult).following !== true)
+      throw new PrefaixError(
+        "UNSUPPORTED",
+        "this daemon cannot follow an attached turn; restart it after upgrading",
+      );
+    conversationId = started.conversationId ?? args.conversationId;
+    turnId = started.turnId;
+    acknowledged = true;
+    options.setTurnId(turnId);
+    options.setConversationId(conversationId);
+    if (options.controller.signal.aborted) onAbort();
+    if (options.detach.aborted) onDetach();
+    const outcome = await Promise.race([ended, controlled]);
+    if ("exit" in outcome) return outcome;
     return {
-      conversationId: started.conversationId,
-      exit: exitForSummary(summary),
-      ...(options.edit !== undefined &&
-      summary.status === "stop" &&
-      summary.buffer !== undefined
-        ? { buffer: summary.buffer }
+      conversationId,
+      exit: exitForSummary(outcome),
+      ...((options.edit !== undefined || options.attach) &&
+      outcome.status === "stop" &&
+      outcome.buffer !== undefined
+        ? {
+            buffer: outcome.buffer,
+            ...(outcome.stagedDiffHash === undefined
+              ? {}
+              : { stagedDiffHash: outcome.stagedDiffHash }),
+          }
         : {}),
     };
   } finally {
+    finished = true;
+    options.detach.removeEventListener("abort", onDetach);
     options.controller.signal.removeEventListener("abort", onAbort);
     client.onClose(() => undefined);
   }
@@ -610,7 +801,10 @@ interface CommandResult {
   conversationId?: string;
   text?: string;
   executePlan?: boolean;
-  edit?: "suggest";
+  edit?: "suggest" | "commit";
+  directCommit?: boolean;
+  attach?: boolean;
+  background?: boolean;
 }
 
 function shellInfo(args: RunArgs) {
@@ -702,6 +896,23 @@ async function runCommand(
           hint: "Use :suggest <what the command should do>.",
         });
       return { exit: EXIT.ok, text: parsed.args, edit: "suggest" };
+    case "commit": {
+      const { hint, run } = parseCommitArgs(parsed.args);
+      return { exit: EXIT.ok, text: hint, edit: "commit", directCommit: run };
+    }
+    case "attach":
+      if (args.conversationId === "")
+        throw new PrefaixError(
+          "USAGE",
+          "no active conversation to attach; run : first",
+        );
+      return { exit: EXIT.ok, text: "", attach: true };
+    case "abort":
+      if (args.conversationId === "")
+        throw new PrefaixError("USAGE", "no active conversation to abort");
+      await client.call("turn.abort", { conversationId: args.conversationId });
+      renderer.notice("abort requested for the detached turn");
+      return { exit: EXIT.ok, background: true };
     case "go":
       if (args.conversationId === "")
         throw new PrefaixError(
@@ -927,6 +1138,9 @@ const HELP_LINES: readonly string[] = [
   "  :info               what this conversation is doing",
   "  :copy               copy the last answer",
   "  :suggest <want>     suggest a command (:s); editable, never auto-runs; Enter to execute",
+  "  :commit [hint]      draft staged changes into the buffer; --run commits directly",
+  "  :attach             replay and follow the active conversation's detached turn",
+  "  :abort              stop the active conversation's detached turn",
   "  :ask <text>         use read-only tools to answer",
   "  :plan <task>        plan with read-only tools",
   "  :go                 execute the completed plan with normal tools",
@@ -934,7 +1148,7 @@ const HELP_LINES: readonly string[] = [
   "  :help               this text",
   "  :doctor             check the backend, shell, socket, and config",
   "",
-  "esc or ctrl+c aborts a turn; anything you type during one comes back here.",
+  "esc or ctrl+c aborts a turn; ctrl+z detaches run turns; typeahead returns here.",
 ];
 
 /**

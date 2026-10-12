@@ -21,11 +21,12 @@ import { tryLock, type LockHandle } from "./lock.js";
 import { TurnManager, type TurnHandle } from "./turns.js";
 import { Operations } from "./operations.js";
 import { Router, SocketServer, type Connection } from "./server.js";
-import type {
-  ClientMessage,
-  OperationName,
-  TurnSummary,
-  TurnStartParams,
+import {
+  PROTOCOL_VERSION,
+  type ClientMessage,
+  type OperationName,
+  type TurnSummary,
+  type TurnStartParams,
 } from "../core/protocol.js";
 
 export const DEFAULT_IDLE_MINUTES = 30;
@@ -61,6 +62,8 @@ export class Daemon {
   readonly #pool: AgentPool;
   readonly #store: ConversationStore;
   readonly #status: ReturnType<typeof createStatusFiles>;
+  /** Most recently detached turn per shell; older completions must not overwrite it. */
+  readonly #backgroundTurns = new Map<string, string>();
   readonly #ops: Operations;
   readonly #startedAt: number;
   readonly #onIdleCheck: (() => Promise<boolean>) | undefined;
@@ -129,6 +132,17 @@ export class Daemon {
       now: this.#now,
       send: (connection, message) => connection.send(message),
       onEnd: (turn, summary, info) => this.#onTurnEnd(turn, summary, info),
+      onDetach: async (turn) => {
+        for (const shellId of turn.statusShells) {
+          this.#backgroundTurns.delete(shellId);
+          this.#backgroundTurns.set(shellId, turn.id);
+          if (this.#backgroundTurns.size > 1024)
+            this.#backgroundTurns.delete(
+              this.#backgroundTurns.keys().next().value!,
+            );
+          await this.#status.writeStatus(shellId, "running");
+        }
+      },
       log: this.#log.info,
     });
 
@@ -271,8 +285,15 @@ export class Daemon {
           },
           connection,
         );
+      case "turn.commit":
+        return this.#ops.turnStart(
+          { ...(params as TurnStartParams), edit: "commit" },
+          connection,
+        );
+      case "turn.detach":
+        return this.#ops.turnDetach(params as never, connection);
       case "turn.abort":
-        return this.#ops.turnAbort(params as never);
+        return this.#ops.turnAbort(params as never, connection);
       case "turn.attach":
         return this.#ops.turnAttach(params as never, connection);
       case "conv.rm":
@@ -308,7 +329,11 @@ export class Daemon {
       case "status.get":
         return this.#ops.statusGet(params as never);
       case "daemon.ping":
-        return { version: this.#version, pid: process.pid, v: 1 };
+        return {
+          version: this.#version,
+          pid: process.pid,
+          v: PROTOCOL_VERSION,
+        };
       case "daemon.stop":
         // Answer first, then exit: a client waiting on this response must not
         // see a closed socket instead of an acknowledgement.
@@ -333,7 +358,11 @@ export class Daemon {
     // An abort is not a failure the user needs to see on their next prompt; a
     // crash is.
     const status = summary.status === "error" ? "error" : "done";
-    await this.#status.writeStatus(turn.shellId, status).catch(() => undefined);
+    for (const shellId of turn.statusShells) {
+      const background = this.#backgroundTurns.get(shellId);
+      if (background === undefined || background === turn.id)
+        await this.#status.writeStatus(shellId, status).catch(() => undefined);
+    }
     this.#pool.touch(turn.conversationId);
     if (!this.#stopping) this.#pool.warmSpare(info.root, info.env);
     this.#log.info("turn finished", {

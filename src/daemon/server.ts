@@ -329,7 +329,7 @@ export class Router {
             "PROTOCOL_MISMATCH",
             `this daemon speaks protocol v${String(PROTOCOL_VERSION)}, the client asked for v${String(message.v)}`,
             {
-              hint: "The client and daemon are from different versions. Run `prefaix daemon stop`, then retry.",
+              hint: "The client and daemon are from different versions. Stop the daemon with its original CLI, or terminate the PID recorded in daemon.lock, then retry.",
             },
           ),
         ),

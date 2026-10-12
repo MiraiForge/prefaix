@@ -15,7 +15,7 @@ import { resolvePaths } from "../../src/core/paths.js";
 import { defaultConfig } from "../../src/core/config/schema.js";
 import { lockIsStale, tryLock, LockHeldError } from "../../src/daemon/lock.js";
 import { EventRing, TurnManager } from "../../src/daemon/turns.js";
-import { isErrorInfo } from "../../src/core/protocol.js";
+import { isErrorInfo, PROTOCOL_VERSION } from "../../src/core/protocol.js";
 import { TestClient } from "../support/client.js";
 import type { PrefaixConfig } from "../../src/core/config/schema.js";
 import type { TurnStartParams } from "../../src/core/protocol.js";
@@ -219,7 +219,7 @@ describe("the daemon lifecycle", () => {
     const client = await connect();
     expect(client.hello).toMatchObject({
       t: "hello",
-      v: 1,
+      v: PROTOCOL_VERSION,
       version: "0.0.0-test",
       pid: process.pid,
     });
@@ -229,9 +229,9 @@ describe("the daemon lifecycle", () => {
     expect(daemon.paths.socket).toBe(paths.socket);
   });
 
-  it("refuses a client that speaks another protocol version", async () => {
+  it.each([1, 99])("refuses a client that speaks protocol v%s", async (v) => {
     await startDaemon();
-    const bad = await TestClient.open(paths.socket, { v: 99 });
+    const bad = await TestClient.open(paths.socket, { v });
     clients.push(bad);
     // The daemon answers with an error and hangs up, so there is no request to
     // correlate against: the client has to be able to read a bare refusal.

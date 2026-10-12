@@ -1,10 +1,11 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { run, parseRunArgs, writeDirectives } from "../../src/client/run.js";
 import { DaemonClient, isConnectRefused } from "../../src/client/connection.js";
 import { Daemon } from "../../src/daemon/daemon.js";
+import { SocketServer } from "../../src/daemon/server.js";
 import {
   defaultConfig,
   type PrefaixConfig,
@@ -757,24 +758,59 @@ describe("autospawn", () => {
     expect(isConnectRefused(new Error("boom"))).toBe(false);
   });
 
-  it("spawns a daemon and waits for it to answer", async () => {
-    let spawned = 0;
-    const client = new DaemonClient({
-      paths,
-      version: VERSION,
-      spawnDaemon: (entry) => {
-        spawned += 1;
-        expect(entry).not.toBe("");
-        void startDaemon();
-      },
-      sleep: (ms) =>
-        new Promise((resolve) => setTimeout(resolve, Math.min(ms, 10))),
-    });
-    const hello = await client.connect();
-    expect(spawned).toBe(1);
-    expect(hello.pid).toBe(process.pid);
-    client.close();
-  });
+  it.each([false, true])(
+    "joins daemon startup before cleanup (delayed listen completion: %s)",
+    async (delayed) => {
+      let release = () => {};
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const listen = SocketServer.prototype.listen;
+      const listening = vi
+        .spyOn(SocketServer.prototype, "listen")
+        .mockImplementation(async function (this: SocketServer) {
+          await listen.call(this);
+          if (delayed) await held;
+        });
+      let spawned = 0;
+      let startup: Promise<Daemon> | undefined;
+      let ready = false;
+      const client = new DaemonClient({
+        paths,
+        version: VERSION,
+        spawnDaemon: (entry) => {
+          spawned++;
+          expect(entry).not.toBe("");
+          startup = startDaemon().then((instance) => {
+            ready = true;
+            return instance;
+          });
+          // Observe rejection immediately, then propagate it through the joined
+          // original promise. Never let an early hello race test teardown.
+          void startup.catch(() => undefined);
+        },
+        sleep: (ms) =>
+          new Promise((resolve) => setTimeout(resolve, Math.min(ms, 10))),
+      });
+      try {
+        const hello = await client.connect();
+        if (delayed) expect(ready).toBe(false);
+        release();
+        await startup;
+        expect(ready).toBe(true);
+        expect(spawned).toBe(1);
+        expect(hello.pid).toBe(process.pid);
+      } finally {
+        release();
+        try {
+          await startup;
+        } finally {
+          client.close();
+          listening.mockRestore();
+        }
+      }
+    },
+  );
 
   it("gives up with the log path when nothing comes up", async () => {
     const client = new DaemonClient({
