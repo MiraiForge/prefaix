@@ -167,13 +167,31 @@ export function captureIdentity(
   payload: unknown,
   facts: GitFacts,
 ) {
+  return sourceIdentity(env, payload, facts, "native");
+}
+
+export function captureEventIdentity(
+  env: Environment,
+  payload: unknown,
+  facts: GitFacts,
+) {
+  return sourceIdentity(env, payload, facts, "event");
+}
+
+function sourceIdentity(
+  env: Environment,
+  payload: unknown,
+  facts: GitFacts,
+  kind: "native" | "event",
+) {
   requireValue(
     env.GITHUB_SERVER_URL === "https://github.com" &&
       env.GITHUB_REPOSITORY === REPOSITORY,
   );
   requireValue(identifier(env.GITHUB_REPOSITORY_ID) === REPOSITORY_ID);
   requireValue(
-    env.RUNNER_OS === "macOS" && env.RUNNER_ENVIRONMENT === "github-hosted",
+    env.RUNNER_OS === (kind === "native" ? "macOS" : "Linux") &&
+      env.RUNNER_ENVIRONMENT === "github-hosted",
   );
   const runId = identifier(env.GITHUB_RUN_ID);
   const runAttempt = identifier(env.GITHUB_RUN_ATTEMPT);
@@ -221,7 +239,20 @@ export function captureIdentity(
   const matrix = record(JSON.parse(env.PREFAIX_NATIVE_MATRIX));
   const job = env.GITHUB_JOB;
   let lane: string;
-  if (job === "check" || job === "performance") {
+  if (kind === "event") {
+    requireValue(job === "event-source" && Object.keys(matrix).length === 0);
+    requireValue(
+      env.GITHUB_WORKFLOW === "CI" &&
+        env.GITHUB_WORKFLOW_REF === env.PREFAIX_NATIVE_WORKFLOW_REF,
+    );
+    requireValue(
+      env.GITHUB_EVENT_NAME === "workflow_dispatch" ||
+        (env.GITHUB_EVENT_NAME === "push" &&
+          ref.startsWith("refs/tags/v") &&
+          !ref.slice("refs/tags/".length).includes("/")),
+    );
+    lane = "event-source";
+  } else if (job === "check" || job === "performance") {
     requireValue(Object.keys(matrix).sort().join(",") === "node,os");
     requireValue(matrix.os === (job === "check" ? "macos-latest" : "macos-15"));
     requireValue(
@@ -255,6 +286,21 @@ export function captureIdentity(
     piSmoke: inputs.pi_smoke === true,
   };
   const event = record(payload);
+  if (kind === "event") {
+    requireValue(
+      Object.keys(inputs).sort().join(",") === "flake_gate,pi_smoke",
+    );
+    if (env.GITHUB_EVENT_NAME === "push") {
+      requireValue(!choices.flakeGate && !choices.piSmoke);
+    } else {
+      const eventInputs = record(event.inputs);
+      requireValue(
+        Object.keys(eventInputs).sort().join(",") === "flake_gate,pi_smoke" &&
+          eventInputs.flake_gate === String(choices.flakeGate) &&
+          eventInputs.pi_smoke === String(choices.piSmoke),
+      );
+    }
+  }
   const repository = record(event.repository);
   requireValue(
     repository.full_name === REPOSITORY &&
@@ -364,11 +410,12 @@ export function captureIdentity(
 }
 
 export function capture(env: Environment) {
-  requireValue(process.platform === "darwin");
+  const eventSource = env.GITHUB_JOB === "event-source";
+  requireValue(process.platform === (eventSource ? "linux" : "darwin"));
   requireValue(
     env.GITHUB_WORKSPACE && env.GITHUB_EVENT_PATH && env.RUNNER_TEMP,
   );
-  const evidence = captureIdentity(
+  const evidence = (eventSource ? captureEventIdentity : captureIdentity)(
     env,
     readEvent(env.GITHUB_EVENT_PATH),
     readGitFacts(env.GITHUB_WORKSPACE),
@@ -377,7 +424,7 @@ export function capture(env: Environment) {
   requireValue(Buffer.byteLength(json) <= 8192);
   const directory = join(
     env.RUNNER_TEMP,
-    `prefaix-native-${evidence.runId}-${evidence.runAttempt}-${evidence.checkRunId}`,
+    `prefaix-${eventSource ? "event" : "native"}-${evidence.runId}-${evidence.runAttempt}-${evidence.checkRunId}`,
   );
   mkdirSync(directory, { mode: 0o700 });
   writeFileSync(join(directory, "source.json"), json, {

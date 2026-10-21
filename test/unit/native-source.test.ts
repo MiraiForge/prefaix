@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   capture,
   captureIdentity,
+  captureEventIdentity,
   readEvent,
   type GitFacts,
 } from "../../scripts/ci/native-source.js";
@@ -353,4 +354,137 @@ describe("native matrix source evidence", () => {
       expect(() => capture(fixture().env)).toThrow();
     },
   );
+});
+
+describe("early direct CI event source", () => {
+  function direct(flake = false, pi = false, ref = "refs/heads/ci/verify") {
+    const x = fixture();
+    setRef(x.env, ref);
+    Object.assign(x.env, {
+      GITHUB_JOB: "event-source",
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      RUNNER_OS: "Linux",
+      PREFAIX_NATIVE_MATRIX: "{}",
+      PREFAIX_NATIVE_INPUTS: JSON.stringify({
+        flake_gate: flake,
+        pi_smoke: pi,
+      }),
+    });
+    const event = {
+      repository,
+      ref: ref.slice(11),
+      inputs: { flake_gate: String(flake), pi_smoke: String(pi) },
+    };
+    return { ...x, event };
+  }
+
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])(
+    "captures typed choices flake=%s pi=%s before any matrix completes",
+    (flake, pi) => {
+      const x = direct(flake, pi);
+      expect(captureEventIdentity(x.env, x.event, x.facts)).toMatchObject({
+        job: "event-source",
+        lane: "event-source",
+        matrix: {},
+        choices: { flakeGate: flake, piSmoke: pi },
+        stabilityRequired: flake,
+        sourceSha: source,
+        testedSha: source,
+        treeSha: tree,
+        parents: [base],
+        runId: "12345",
+        runAttempt: "2",
+        checkRunId: "98765",
+        eventAfter: null,
+      });
+      expect(() => captureIdentity(x.env, x.event, x.facts)).toThrow();
+    },
+  );
+
+  it.each([source, "e".repeat(40)])(
+    "preserves the tag object separately from the checked-out commit %s",
+    (after) => {
+      const x = direct(false, false, "refs/tags/v1.2.3");
+      x.env.GITHUB_EVENT_NAME = "push";
+      const event = {
+        repository,
+        ref: x.env.GITHUB_REF,
+        after,
+        deleted: false,
+      };
+      expect(captureEventIdentity(x.env, event, x.facts)).toMatchObject({
+        eventAfter: after,
+        testedSha: source,
+        stabilityRequired: true,
+      });
+      x.env.PREFAIX_NATIVE_INPUTS = '{"flake_gate":false,"pi_smoke":true}';
+      expect(() => captureEventIdentity(x.env, event, x.facts)).toThrow();
+    },
+  );
+
+  it("preserves case-insensitive stability on a manual tag", () => {
+    const x = direct(false, true, "refs/tags/V1.2.3");
+    x.event.ref = "V1.2.3";
+    expect(
+      captureEventIdentity(x.env, x.event, x.facts).stabilityRequired,
+    ).toBe(true);
+  });
+
+  it.each([
+    ["GITHUB_EVENT_NAME", "pull_request"],
+    ["GITHUB_EVENT_NAME", "pull_request_target"],
+    ["GITHUB_EVENT_NAME", "repository_dispatch"],
+    ["GITHUB_JOB", "check"],
+    ["RUNNER_OS", "macOS"],
+    ["RUNNER_ENVIRONMENT", "self-hosted"],
+    ["GITHUB_WORKFLOW", "Release"],
+    [
+      "GITHUB_WORKFLOW_REF",
+      "MiraiForge/prefaix/.github/workflows/release.yml@refs/heads/ci/verify",
+    ],
+    ["PREFAIX_NATIVE_MATRIX", '{"os":"ubuntu-latest"}'],
+    ["PREFAIX_NATIVE_INPUTS", "{}"],
+    ["PREFAIX_NATIVE_INPUTS", '{"flake_gate":"false","pi_smoke":false}'],
+    ["PREFAIX_NATIVE_INPUTS", '{"flake_gate":false,"pi_smoke":0}'],
+    ["PREFAIX_NATIVE_INPUTS", '{"flake_gate":true,"pi_smoke":false}'],
+  ])("rejects unbound event context %s = %s", (key, value) => {
+    const x = direct();
+    x.env[key] = value;
+    expect(() => captureEventIdentity(x.env, x.event, x.facts)).toThrow();
+  });
+
+  it.each([
+    {},
+    { flake_gate: false, pi_smoke: false },
+    { flake_gate: "False", pi_smoke: "false" },
+    { flake_gate: "false", pi_smoke: "true" },
+    { flake_gate: "false", pi_smoke: "false", extra: "false" },
+  ])("rejects payload/context choice mismatches %j", (inputs) => {
+    const x = direct();
+    expect(() =>
+      captureEventIdentity(x.env, { ...x.event, inputs }, x.facts),
+    ).toThrow();
+  });
+
+  it.each([
+    "refs/heads/main",
+    "refs/tags/V1.2.3",
+    "refs/tags/release",
+    "refs/tags/v1/extra",
+  ])("rejects push refs outside the direct tag trigger %s", (ref) => {
+    const x = direct(false, false, ref);
+    x.env.GITHUB_EVENT_NAME = "push";
+    expect(() =>
+      captureEventIdentity(
+        x.env,
+        { repository, ref, after: source, deleted: false },
+        x.facts,
+      ),
+    ).toThrow();
+  });
 });

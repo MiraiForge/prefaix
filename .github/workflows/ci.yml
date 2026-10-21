@@ -25,6 +25,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  event-source:
+    name: CI event source
+    if: >-
+      github.workflow_ref == format('{0}/.github/workflows/ci.yml@{1}', github.repository, github.ref) &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+      - name: Capture CI event source
+        run: node scripts/ci/native-source.ts
+        env:
+          PREFAIX_NATIVE_CHECK_RUN_ID: ${{ job.check_run_id }}
+          PREFAIX_NATIVE_WORKFLOW_REF: ${{ job.workflow_ref }}
+          PREFAIX_NATIVE_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          PREFAIX_NATIVE_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          PREFAIX_NATIVE_WORKFLOW_PATH: ${{ job.workflow_file_path }}
+          PREFAIX_NATIVE_MATRIX: "{}"
+          PREFAIX_NATIVE_INPUTS: '{"flake_gate": ${{ inputs.flake_gate == true }}, "pi_smoke": ${{ inputs.pi_smoke == true }}}'
+      - name: Preserve CI event source
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: event-source-${{ github.run_id }}-${{ github.run_attempt }}-${{ job.check_run_id }}
+          path: ${{ runner.temp }}/prefaix-event-${{ github.run_id }}-${{ github.run_attempt }}-${{ job.check_run_id }}/source.json
+          if-no-files-found: error
+          retention-days: 36
+          overwrite: false
+
   check:
     name: Check (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
