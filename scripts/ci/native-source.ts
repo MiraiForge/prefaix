@@ -241,10 +241,15 @@ function sourceIdentity(
   let lane: string;
   if (kind === "event") {
     requireValue(job === "event-source" && Object.keys(matrix).length === 0);
-    requireValue(
+    const directCI =
       env.GITHUB_WORKFLOW === "CI" &&
-        env.GITHUB_WORKFLOW_REF === env.PREFAIX_NATIVE_WORKFLOW_REF,
-    );
+      env.GITHUB_WORKFLOW_REF === env.PREFAIX_NATIVE_WORKFLOW_REF;
+    const releaseCaller =
+      env.GITHUB_WORKFLOW === "Release" &&
+      env.GITHUB_WORKFLOW_REF ===
+        `${REPOSITORY}/.github/workflows/release.yml@${ref}` &&
+      env.GITHUB_EVENT_NAME === "push";
+    requireValue(directCI || releaseCaller);
     requireValue(
       env.GITHUB_EVENT_NAME === "workflow_dispatch" ||
         (env.GITHUB_EVENT_NAME === "push" &&

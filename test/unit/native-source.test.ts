@@ -435,6 +435,70 @@ describe("early direct CI event source", () => {
     ).toBe(true);
   });
 
+  function release(after = source) {
+    const x = direct(false, false, "refs/tags/v0.1.0");
+    Object.assign(x.env, {
+      GITHUB_EVENT_NAME: "push",
+      GITHUB_WORKFLOW: "Release",
+      GITHUB_WORKFLOW_REF:
+        "MiraiForge/prefaix/.github/workflows/release.yml@refs/tags/v0.1.0",
+    });
+    return {
+      ...x,
+      event: { repository, ref: x.env.GITHUB_REF, after, deleted: false },
+    };
+  }
+
+  it.each([source, "e".repeat(40)])(
+    "captures the Release caller separately from called CI for tag object %s",
+    (after) => {
+      const x = release(after);
+      const evidence = captureEventIdentity(x.env, x.event, x.facts);
+      expect(evidence).toMatchObject({
+        event: "push",
+        callerWorkflowName: "Release",
+        callerWorkflowRef: x.env.GITHUB_WORKFLOW_REF,
+        callerWorkflowSha: source,
+        jobWorkflowRef: x.env.PREFAIX_NATIVE_WORKFLOW_REF,
+        jobWorkflowSha: source,
+        ref: "refs/tags/v0.1.0",
+        eventAfter: after,
+        testedSha: source,
+        stabilityRequired: true,
+        choices: { flakeGate: false, piSmoke: false },
+      });
+      expect(evidence.callerWorkflowRef).not.toBe(evidence.jobWorkflowRef);
+      expect(evidence).not.toHaveProperty("approved");
+      expect(evidence).not.toHaveProperty("success");
+    },
+  );
+
+  it.each([
+    ["GITHUB_WORKFLOW", "CI"],
+    ["GITHUB_EVENT_NAME", "workflow_dispatch"],
+    ["GITHUB_EVENT_NAME", "pull_request"],
+    ["GITHUB_REF", "refs/heads/main"],
+    [
+      "GITHUB_WORKFLOW_REF",
+      "MiraiForge/prefaix/.github/workflows/other.yml@refs/tags/v0.1.0",
+    ],
+    [
+      "GITHUB_WORKFLOW_REF",
+      "other/prefaix/.github/workflows/release.yml@refs/tags/v0.1.0",
+    ],
+    [
+      "GITHUB_WORKFLOW_REF",
+      "MiraiForge/prefaix/.github/workflows/release.yml@refs/tags/v0.2.0",
+    ],
+    ["PREFAIX_NATIVE_WORKFLOW_PATH", ".github/workflows/release.yml"],
+    ["PREFAIX_NATIVE_INPUTS", '{"flake_gate":true,"pi_smoke":false}'],
+    ["PREFAIX_NATIVE_INPUTS", '{"flake_gate":false,"pi_smoke":true}'],
+  ])("rejects changed Release identity %s = %s", (key, value) => {
+    const x = release();
+    x.env[key] = value;
+    expect(() => captureEventIdentity(x.env, x.event, x.facts)).toThrow();
+  });
+
   it.each([
     ["GITHUB_EVENT_NAME", "pull_request"],
     ["GITHUB_EVENT_NAME", "pull_request_target"],
