@@ -262,6 +262,7 @@ export function captureIdentity(
   );
   let sourceSha = testedSha;
   let baseSha: string | null = null;
+  let eventBaseSha: string | null = null;
   let pullRequest: number | null = null;
   let headRepository = REPOSITORY;
   let headRepositoryId = REPOSITORY_ID;
@@ -307,13 +308,11 @@ export function captureIdentity(
         env.GITHUB_BASE_REF === baseBranch,
     );
     sourceSha = sha(head.sha);
-    baseSha = sha(base.sha);
+    eventBaseSha = sha(base.sha);
+    requireValue(parents.length === 2 && parents[1] === sourceSha);
+    // The event's base can lag the base used to create this exact merge commit.
+    baseSha = sha(parents[0]);
     requireValue(new Set([testedSha, sourceSha, baseSha]).size === 3);
-    requireValue(
-      parents.length === 2 &&
-        parents[0] === baseSha &&
-        parents[1] === sourceSha,
-    );
   } else {
     requireValue(ref.startsWith("refs/heads/") || ref.startsWith("refs/tags/"));
     if (env.GITHUB_EVENT_NAME === "push") {
@@ -351,6 +350,7 @@ export function captureIdentity(
     jobWorkflowSha: testedSha,
     sourceSha,
     baseSha,
+    eventBaseSha,
     testedSha,
     treeSha,
     parents,

@@ -14,6 +14,13 @@ requires the 50-rerun stability sweep. Pi's optional choice is recorded but does
 become an aggregate dependency. A tag's event object is recorded separately from
 the checkout commit so a consumer can verify annotated tag peeling.
 
+For a PR, `baseSha` is the checked-out merge commit's first parent. The payload's
+base SHA is retained separately as `eventBaseSha`, because it can lag the base
+used to create that merge. The second parent must still match the event's source
+head, and the checkout must match `GITHUB_SHA`. The consumer must reconcile both
+base identities with the authenticated run and current base branch; a source
+record with a different event base does not waive freshness or admission checks.
+
 Caller and job workflow identities are separate. GitHub associates the `github`
 context with the caller of a reusable workflow; `job.workflow_*` identifies the
 workflow defining the job. This preserves the distinction between direct CI and

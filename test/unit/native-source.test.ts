@@ -107,6 +107,8 @@ describe("native matrix source evidence", () => {
     const evidence = captureIdentity(x.env, x.event, x.facts);
     expect(evidence).toMatchObject({
       sourceSha: source,
+      baseSha: null,
+      eventBaseSha: null,
       testedSha: source,
       treeSha: tree,
       parents: [base],
@@ -157,6 +159,7 @@ describe("native matrix source evidence", () => {
       expect(captureIdentity(x.env, x.event, x.facts)).toMatchObject({
         sourceSha: source,
         baseSha: base,
+        eventBaseSha: base,
         testedSha: merge,
         parents: [base, source],
         pullRequest: 8,
@@ -166,6 +169,28 @@ describe("native matrix source evidence", () => {
       });
     },
   );
+
+  it.each([false, true])(
+    "keeps the actual merge base distinct from a stale event base (fork=%s)",
+    (fork) => {
+      const x = pullRequest(fork);
+      const currentBase = "e".repeat(40);
+      x.facts.parents = [currentBase, source];
+      expect(captureIdentity(x.env, x.event, x.facts)).toMatchObject({
+        baseSha: currentBase,
+        eventBaseSha: base,
+        sourceSha: source,
+        testedSha: merge,
+        parents: [currentBase, source],
+      });
+    },
+  );
+
+  it("rejects an invalid event base even when the merge parents are valid", () => {
+    const x = pullRequest();
+    x.event.pull_request.base.sha = "invalid";
+    expect(() => captureIdentity(x.env, x.event, x.facts)).toThrow();
+  });
 
   it("keeps a release caller distinct from the called CI workflow", () => {
     const x = fixture();
