@@ -122,6 +122,30 @@ describe("pty harness", () => {
   });
 
   it.each(usable)(
+    "waits for the actual %s foreground command before interrupting it",
+    async (shell) => {
+      const s = await session(shell);
+      const row = s.promptRow();
+      // The launcher prints readiness, but blocks on input before exec. This
+      // makes the marker/foreground gap deterministic without a timed sleep.
+      s.sendLine(
+        `/bin/sh -c 'printf "__pfx_child_ready\\n"; read ignored; exec /bin/sleep 30'`,
+      );
+      await s.waitFor(/^__pfx_child_ready$/mu);
+      await expect(
+        s.waitForForegroundProcess("sleep", { timeoutMs: 100 }),
+      ).rejects.toThrow(
+        `timed out waiting for ${JSON.stringify('foreground process "sleep"')}.`,
+      );
+      s.press("enter");
+      await s.waitForForegroundProcess("sleep");
+      s.press("ctrl-c");
+      await s.waitForPrompt({ afterRow: row });
+      expect(await s.run("echo recovered")).toBe("recovered");
+    },
+  );
+
+  it.each(usable)(
     "reaps %s before teardown returns even when SIGHUP is ignored",
     async (shell) => {
       const s = await session(shell);
