@@ -534,8 +534,8 @@ for (const shell of TEST_SHELLS)
           await s.waitForPrompt({ afterRow: row, timeoutMs: 15000 });
           expect(await ttyMode()).toBe(before);
           const foregroundRow = s.promptRow();
-          s.sendLine("printf '__pfx_foreground_ready\\n'; sleep 30");
-          await s.waitFor(/^__pfx_foreground_ready$/mu);
+          s.sendLine("sleep 30");
+          await s.waitForForegroundProcess("sleep");
           s.press("ctrl-c");
           await s.waitForPrompt({ afterRow: foregroundRow });
           expect(await s.run("echo recovered")).toBe("recovered");

@@ -56,6 +56,21 @@ if (source === undefined || target === undefined) {
 }
 const prefix = resolve(target);
 const binary = join(prefix, "bin", shell);
+
+function verifyJobControl() {
+  if (shell !== "bash") return;
+  const probe = spawnSync(
+    binary,
+    ["--noprofile", "--norc", "-c", "set -m && [[ $- == *m* ]]"],
+    { encoding: "utf8" },
+  );
+  if (probe.error || probe.status !== 0) {
+    throw new Error(
+      `${binary} lacks job control required by the PTY tests. Use a fresh prefix.`,
+    );
+  }
+}
+
 if (existsSync(binary)) {
   const installed = spawnSync(binary, ["--version"], { encoding: "utf8" });
   const escapedVersion = version.replaceAll(".", "\\.");
@@ -67,6 +82,7 @@ if (existsSync(binary)) {
       `The existing ${binary} is not the requested ${shell} ${version}. Use a fresh prefix.`,
     );
   }
+  verifyJobControl();
   console.log(binary);
   process.exit(0);
 }
@@ -113,9 +129,10 @@ try {
       unpacked,
       {
         ...process.env,
-        // Old bash predates modern clang's implicit-declaration errors.
+        // Old bash's configure probes use implicit int as well as undeclared
+        // functions. Rejecting either silently disables features like job control.
         CFLAGS:
-          "-O2 -std=gnu11 -Wno-implicit-function-declaration -Wno-int-conversion -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
+          "-O2 -std=gnu11 -Wno-implicit-function-declaration -Wno-implicit-int -Wno-int-conversion -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0",
       },
     );
     run("make", ["-j2"], unpacked);
@@ -181,6 +198,7 @@ try {
     run("cmake", ["--install", build]);
   }
   run(binary, ["--version"]);
+  verifyJobControl();
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
