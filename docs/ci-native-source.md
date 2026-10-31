@@ -26,6 +26,20 @@ context with the caller of a reusable workflow; `job.workflow_*` identifies the
 workflow defining the job. This preserves the distinction between direct CI and
 the release workflow's `verify` call. See GitHub's [context reference](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context).
 
+The early Linux `event-source` job also captures version-tag pushes through the
+exact `Release` caller at `.github/workflows/release.yml`. Its defining job must
+still come from `.github/workflows/ci.yml` at the same ref and commit. Both manual
+choices remain false and the version tag requires the original stability sweep.
+Other reusable callers and manual Release invocations are rejected. Direct CI's
+manual and version-tag paths remain supported.
+
+This early record is uploaded before the verification matrix finishes. A protected
+consumer must authenticate the Release workflow ID and reviewed caller bytes in
+addition to the CI/helper bytes, then independently verify all required native and
+Linux results. The record cannot satisfy the Release `verify` dependency or the
+explicit version approval by itself. The existing publisher, environment and
+permissions are unchanged; this preparation creates no tag or release.
+
 This record describes source identity, not test success or permission to publish.
 A future protected Janus aggregate must independently verify the reviewed workflow
 and capture-script blobs, current GitHub run and attempt, all eight expected hosted
