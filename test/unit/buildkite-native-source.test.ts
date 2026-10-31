@@ -167,6 +167,28 @@ describe("Buildkite native source evidence", () => {
       ),
     ).toThrow();
     expect(() =>
+      captureBuildkiteIdentity(env, event(), facts, {
+        ...control,
+        testedSha: sourceSha,
+      }),
+    ).toThrow();
+    expect(() =>
+      captureBuildkiteIdentity(
+        {
+          ...env,
+          GITHUB_JOB: "shell-versions",
+          PREFAIX_NATIVE_MATRIX: JSON.stringify({
+            os: "macos-latest",
+            bash: "4.4",
+            fish: "4.0.2",
+          }),
+        },
+        event(),
+        facts,
+        control,
+      ),
+    ).toThrow();
+    expect(() =>
       captureBuildkiteIdentity(
         env,
         { ...event(), repository: { id: 1, full_name: "MiraiForge/prefaix" } },
@@ -261,13 +283,28 @@ describe("native-only workflow boundary", () => {
       expect(block).toContain(
         'node "$GITHUB_WORKSPACE/control/scripts/ci/buildkite-native-source.ts"',
       );
-      expect(block.indexOf("Preserve Buildkite native source")).toBeLessThan(
-        block.indexOf("oven-sh/setup-bun@"),
+      const capture = block.indexOf(
+        "control/scripts/ci/buildkite-native-source.ts",
       );
+      expect(capture).toBeGreaterThanOrEqual(0);
+      expect(block.indexOf("oven-sh/setup-bun@")).toBeGreaterThan(capture);
       expect(block).toContain("overwrite: false");
       expect(block.match(/persist-credentials: false/g)).toHaveLength(2);
     }
     expect(workflow).toContain("startsWith(inputs.source_ref, 'refs/tags/v')");
     expect(workflow).toContain("path: source/build/flake");
+  });
+  it("keeps diagnostic evidence distinct across workflow attempts", () => {
+    const names = [
+      ...workflow.matchAll(/name: ((?:startup|performance|stability)-.+)/g),
+    ].map((match) => match[1]!);
+    expect(names).toHaveLength(3);
+    for (const name of names) {
+      expect(name).toContain("${{ matrix.os }}");
+      expect(name).toContain("-attempt${{ github.run_attempt }}");
+      expect(name.replace("${{ github.run_attempt }}", "1")).not.toBe(
+        name.replace("${{ github.run_attempt }}", "2"),
+      );
+    }
   });
 });

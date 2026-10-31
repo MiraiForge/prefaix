@@ -165,7 +165,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: startup-${{ matrix.os }}-node${{ matrix.node }}
+          name: startup-${{ matrix.os }}-node${{ matrix.node }}-attempt${{ github.run_attempt }}
           path: ${{ runner.temp }}/prefaix-startup.json
           if-no-files-found: ignore
       - name: Built CLI performance budgets (50 samples)
@@ -176,7 +176,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: performance-${{ matrix.os }}-node${{ matrix.node }}
+          name: performance-${{ matrix.os }}-node${{ matrix.node }}-attempt${{ github.run_attempt }}
           path: ${{ runner.temp }}/prefaix-performance.json
           if-no-files-found: ignore
 
@@ -258,6 +258,6 @@ jobs:
         if: always() && (inputs.flake_gate == true || startsWith(inputs.source_ref, 'refs/tags/v'))
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: stability-${{ matrix.os }}-bash${{ matrix.bash }}-fish${{ matrix.fish }}
+          name: stability-${{ matrix.os }}-bash${{ matrix.bash }}-fish${{ matrix.fish }}-attempt${{ github.run_attempt }}
           path: source/build/flake
           if-no-files-found: ignore
