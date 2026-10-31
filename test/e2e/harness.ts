@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import headless from "@xterm/headless";
 import type { ITerminalOptions } from "@xterm/headless";
 
@@ -439,6 +439,20 @@ export class ShellSession {
     await this.#waitFor(
       () => needles.some((needle) => this.screenText().includes(needle)),
       needles.join(" | "),
+      options,
+    );
+  }
+
+  /** Wait for the terminal's foreground command, not an earlier shell marker. */
+  async waitForForegroundProcess(
+    name: string,
+    options: { timeoutMs?: number } = {},
+  ): Promise<void> {
+    // node-pty queries the PTY's foreground process group. A shell can print
+    // readiness before it forks/execs the command that should receive Ctrl+C.
+    await this.#waitFor(
+      () => basename(this.#child.process ?? "") === name,
+      `foreground process ${JSON.stringify(name)}`,
       options,
     );
   }
