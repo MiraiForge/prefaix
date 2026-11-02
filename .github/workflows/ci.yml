@@ -308,6 +308,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
+          import http.client
           import json
           import os
           import re
@@ -353,7 +354,8 @@ jobs:
               pipeline = os.environ['JANUS_PIPELINE']
               if os.environ['GITHUB_REPOSITORY'] != repository:
                   raise SystemExit('Repository identity mismatch')
-              event = json.load(open(os.environ['GITHUB_EVENT_PATH']))
+              with open(os.environ['GITHUB_EVENT_PATH']) as event_file:
+                  event = json.load(event_file)
               if os.environ['GITHUB_EVENT_NAME'] == 'pull_request':
                   pr = event['pull_request']
                   if pr['head']['repo']['full_name'] != repository or pr['base']['ref'] != 'main':
@@ -367,28 +369,60 @@ jobs:
                   raise SystemExit('Event is not admitted to Janus ordinary CI')
               if not re.fullmatch(r'[0-9a-f]{40}', sha):
                   raise SystemExit('Source must be an exact commit')
-              url = 'https://api.github.com/repos/' + repository + '/commits/' + sha + '/statuses?per_page=100'
-              request = urllib.request.Request(url, headers={
+              url = 'https://api.github.com/repos/' + repository + '/commits/' + sha + '/statuses?per_page=100&page='
+              headers = {
                   'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
                   'Accept': 'application/vnd.github+json',
                   'X-GitHub-Api-Version': '2022-11-28',
-              })
+              }
               deadline = time.monotonic() + 30 * 60
-              # At most 121 metadata reads, within a 30-minute wall-clock deadline.
-              for attempt in range(121):
+              page = 1
+              # The shared cap counts every page and every failed request.
+              for _ in range(121):
                   remaining = deadline - time.monotonic()
                   if remaining <= 0:
                       break
-                  with urllib.request.urlopen(request, timeout=min(10, remaining)) as response:
-                      rows = json.load(response)
-                  state = selected_status(rows, context, pipeline)
-                  if state == 'success':
-                      print('Verified ' + context + ' for ' + sha)
-                      return
-                  if state in ('failure', 'error'):
-                      raise SystemExit('Janus ordinary CI failed for ' + sha)
-                  time.sleep(min(15, max(0, deadline - time.monotonic())))
-              raise SystemExit('Janus ordinary CI did not pass within 30 minutes')
+                  delay = 15
+                  request = urllib.request.Request(url + str(page), headers=headers)
+                  try:
+                      with urllib.request.urlopen(request, timeout=min(10, remaining)) as response:
+                          rows = json.load(response)
+                  except urllib.error.HTTPError as error:
+                      retry_after = error.headers.get('Retry-After', '') if error.headers else ''
+                      reset = error.headers.get('X-RateLimit-Reset', '') if error.headers else ''
+                      exhausted = error.headers and error.headers.get('X-RateLimit-Remaining') == '0'
+                      retryable = error.code in (429, 500, 502, 503, 504)
+                      limited = False
+                      try:
+                          limited = error.code == 403 and (
+                              bool(retry_after) or exhausted or 'secondary rate limit' in
+                              error.read(4096).decode('utf-8', errors='replace').lower()
+                          )
+                      except (OSError, http.client.HTTPException):
+                          retryable = True
+                      finally:
+                          error.close()
+                      if not limited and not retryable:
+                          raise
+                      if retry_after.isdigit():
+                          delay = max(delay, int(retry_after))
+                      if exhausted and reset.isdigit():
+                          delay = max(delay, int(reset) - time.time())
+                  except (OSError, http.client.HTTPException, json.JSONDecodeError):
+                      pass
+                  else:
+                      state = selected_status(rows, context, pipeline)
+                      if state == 'success':
+                          print('Verified ' + context + ' for ' + sha)
+                          return
+                      if state in ('failure', 'error'):
+                          raise SystemExit('Janus ordinary CI failed for ' + sha)
+                      if state is None and len(rows) == 100:
+                          page += 1
+                          continue
+                  page = 1
+                  time.sleep(min(delay, max(0, deadline - time.monotonic())))
+              raise SystemExit('Janus ordinary CI did not pass within 30 minutes or 121 reads')
 
 
           if __name__ == '__main__':
