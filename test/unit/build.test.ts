@@ -126,6 +126,11 @@ describe("application bundles", () => {
 
   it("loads commit-only builtins only when the bundled commit path is called", () => {
     const cwd = workspace();
+    const init = spawnSync("git", ["init", "--quiet"], {
+      cwd,
+      encoding: "utf8",
+    });
+    expect(init.status, init.stdout + init.stderr).toBe(0);
     for (const directory of ["cli", "core", "context"])
       mkdirSync(join(cwd, "src", directory), { recursive: true });
     for (const file of ["core/errors.ts", "context/staged-diff.ts"])
