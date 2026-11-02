@@ -9,6 +9,9 @@ permissions:
 
 jobs:
   verify:
+    permissions:
+      contents: read
+      statuses: read
     uses: ./.github/workflows/ci.yml
   publish:
     needs: verify
