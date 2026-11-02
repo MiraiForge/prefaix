@@ -157,9 +157,12 @@ describe("architecture import boundaries", () => {
         cwd: root,
         input: 'export * from "../agents/pi/adapter.js";',
         encoding: "utf8",
+        // This fresh process must load ESLint and the TypeScript parser.
+        timeout: 10_000,
       },
     );
+    expect(result.error).toBeUndefined();
     expect(result.status, result.stderr).toBe(1);
     expect(result.stdout).toContain("no-restricted-imports");
-  });
+  }, 15_000);
 });
