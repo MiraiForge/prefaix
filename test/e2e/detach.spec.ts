@@ -108,6 +108,8 @@ async function detach(s: ShellSession) {
   await s.waitFor("detachable-before");
   s.send("\u001a");
   await s.waitForPrompt({ afterRow: row });
+  // The left prompt and right-hand status can arrive in separate PTY chunks.
+  await s.waitFor("⟳ running");
   expect(s.screenText()).toContain("⟳ running");
   const id = await s.readVariable("PREFAIX_CONVERSATION_ID");
   expect(daemon!.turns.runningFor(id)?.owner).toBe("detached");

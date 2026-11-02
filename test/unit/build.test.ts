@@ -1,11 +1,13 @@
 import { spawnSync } from "node:child_process";
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -124,6 +126,119 @@ describe("application bundles", () => {
     );
   });
 
+  it("keeps doctor probes out of the foreground bundle but runs them on demand", () => {
+    const cwd = workspace();
+    for (const directory of ["cli", "core", "client", "agents"])
+      mkdirSync(join(cwd, "src", directory), { recursive: true });
+    for (const file of ["cli/run.ts", "core/errors.ts"])
+      writeFileSync(
+        join(cwd, "src", file),
+        readFileSync(join(root, "src", file)),
+      );
+    writeFileSync(
+      join(cwd, "src/cli/bin.ts"),
+      "export const fixture = true;\n",
+    );
+    writeFileSync(
+      join(cwd, "src/core/paths.ts"),
+      "export function resolvePaths() { return {}; }\n",
+    );
+    writeFileSync(
+      join(cwd, "src/client/run.ts"),
+      'export async function run(options) { return options.argv[0] === "doctor" ? options.doctor({shell: "zsh", shellVersion: "5"}) : 0; }\n',
+    );
+    writeFileSync(
+      join(cwd, "src/agents/doctor-probe.ts"),
+      'import {createHash} from "node:crypto"; export const result = createHash("sha256").update("probe").digest("hex");\n',
+    );
+    writeFileSync(
+      join(cwd, "src/cli/doctor.ts"),
+      'import {result} from "../agents/doctor-probe.js"; export function runDoctor(options) { options.out(result); return 0; }\n',
+    );
+    const result = build(cwd);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(existsSync(join(cwd, "dist/doctor.js"))).toBe(true);
+    const sources = JSON.parse(
+      readFileSync(join(cwd, "dist/client.js.map"), "utf8"),
+    ).sources as string[];
+    expect(sources.some((source) => source.includes("/agents/"))).toBe(false);
+    expect(sources.some((source) => source.endsWith("/cli/doctor.ts"))).toBe(
+      false,
+    );
+    const probe = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const {runClient} = await import("./dist/client.js");
+        const output = [];
+        const options = {version: "0.0.0", out: value => output.push(value)};
+        const ordinary = await runClient({...options, argv: []});
+        const before = process.moduleLoadList.includes("NativeModule crypto");
+        const doctor = await runClient({...options, argv: ["doctor"]});
+        console.log(JSON.stringify({ordinary, doctor, before, output,
+          after: process.moduleLoadList.includes("NativeModule crypto")}));`,
+      ],
+      { cwd, encoding: "utf8" },
+    );
+    expect(probe.status, probe.stderr).toBe(0);
+    const observed = JSON.parse(probe.stdout);
+    expect(observed.ordinary).toBe(0);
+    expect(observed.doctor).toBe(0);
+    expect(observed.before).toBe(false);
+    expect(observed.after).toBe(true);
+    expect(observed.output).toEqual([
+      "ba9c736f19e7f60b7f6764adb0b7908c0a2b394e09b6c09863528c7f2bc86095",
+    ]);
+  });
+
+  it("runs the real doctor command through the built foreground entry", () => {
+    const cwd = workspace();
+    cpSync(join(root, "src"), join(cwd, "src"), { recursive: true });
+    cpSync(join(root, "package.json"), join(cwd, "package.json"));
+    symlinkSync(join(root, "node_modules"), join(cwd, "node_modules"), "dir");
+    const result = build(cwd);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    const home = join(cwd, "home");
+    mkdirSync(home);
+    const probe = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import {readFileSync} from "node:fs";
+        const {runClient} = await import("./dist/client.js");
+        const home = ${JSON.stringify(home)};
+        const output = [], errors = [];
+        const code = await runClient({
+          argv: ["--shell", "zsh", "--shell-version", "5.9", "--shell-id", "probe",
+            "--nonce", "doctor-probe", "--directives", home + "/directives", "--", ":doctor"],
+          version: "0.0.0", env: {HOME: home, XDG_CONFIG_HOME: home + "/config",
+            XDG_STATE_HOME: home + "/state", XDG_RUNTIME_DIR: home + "/runtime", PATH: "",
+            PREFAIX_PLUGIN_LOADED: "1"},
+          out: text => output.push(text), err: text => errors.push(text),
+          connect: () => { throw new Error("doctor must not connect to the daemon"); }
+        });
+        console.log(JSON.stringify({code, output: output.join(""), errors,
+          directives: readFileSync(home + "/directives", "utf8")}));`,
+      ],
+      { cwd, encoding: "utf8", timeout: 10_000 },
+    );
+    expect(probe.status, probe.stderr).toBe(0);
+    const observed = JSON.parse(probe.stdout);
+    // An empty PATH deliberately makes the real backend unavailable, avoiding
+    // any installed agent, credentials or model while exercising its imports.
+    expect(observed.code).toBe(1);
+    expect(observed.output).toContain(
+      "pi was not found or could not be inspected.",
+    );
+    expect(observed.output).toContain(
+      "Configuration and PREFAIX overrides are valid.",
+    );
+    expect(observed.errors).toEqual([]);
+    expect(observed.directives).toBe("nonce\0doctor-probe\0");
+  });
+
   it("loads commit-only builtins only when the bundled commit path is called", () => {
     const cwd = workspace();
     const init = spawnSync("git", ["init", "--quiet"], {
@@ -171,6 +286,52 @@ describe("application bundles", () => {
       "NativeModule crypto",
     ]);
     expect(observed.failure).toBe("USAGE");
+  });
+
+  it("loads picker filesystem promises only for an external selection", () => {
+    const cwd = workspace();
+    for (const directory of ["cli", "core", "client"])
+      mkdirSync(join(cwd, "src", directory), { recursive: true });
+    for (const file of [
+      "core/errors.ts",
+      "client/picker.ts",
+      "client/tty.ts",
+      "client/process.ts",
+    ])
+      cpSync(join(root, "src", file), join(cwd, "src", file));
+    writeFileSync(
+      join(cwd, "src/cli/bin.ts"),
+      "export const fixture = true;\n",
+    );
+    writeFileSync(
+      join(cwd, "src/cli/run.ts"),
+      'export {pick as runClient} from "../client/picker.js";\n',
+    );
+    writeFileSync(join(cwd, "fzf"), "#!/bin/sh\nprintf '0\\tfirst\\0'\n", {
+      mode: 0o700,
+    });
+    const result = build(cwd);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    const probe = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const {runClient} = await import("./dist/client.js");
+        const loaded = () => process.moduleLoadList.includes("NativeModule fs/promises");
+        const before = loaded();
+        const selected = await runClient({items: [{id: "selected", label: "first"}],
+          title: "probe", mode: "auto", env: {PATH: process.cwd()}, out: () => {}});
+        console.log(JSON.stringify({before, selected, after: loaded()}));`,
+      ],
+      { cwd, encoding: "utf8", timeout: 10_000 },
+    );
+    expect(probe.status, probe.stderr).toBe(0);
+    expect(JSON.parse(probe.stdout)).toEqual({
+      before: false,
+      selected: "selected",
+      after: true,
+    });
   });
 
   it("builds both named ESM bundles with source maps and preserves the CLI shebang", () => {

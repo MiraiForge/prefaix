@@ -1,4 +1,3 @@
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrefaixError } from "../core/errors.js";
@@ -34,6 +33,7 @@ async function external(
   bin: string,
   options: PickerOptions,
 ): Promise<string | undefined> {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
   const { spawn } = await import("node:child_process");
   const directory = await mkdtemp(join(tmpdir(), "prefaix-picker-"));
   try {
