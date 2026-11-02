@@ -2,7 +2,7 @@
   "name": "@miraiforge/prefaix",
   "version": "0.0.0",
   "private": true,
-  "description": "PrefAIx — Forge-class : shell UX with a swappable AI agent backend (pi first)",
+  "description": "PrefAIx \u2014 Forge-class : shell UX with a swappable AI agent backend (pi first)",
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
@@ -29,7 +29,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings 0 && bun run format:check",
-    "test": "vitest run",
+    "test": "python3 -I scripts/test-ci-status-bridge.py && vitest run",
     "test:contract": "vitest run test/contract",
     "test:e2e": "bun run build && vitest run --config vitest.e2e.config.ts",
     "test:iterm": "PREFAIX_ITERM=1 vitest run --config vitest.e2e.config.ts test/e2e/iterm.spec.ts",

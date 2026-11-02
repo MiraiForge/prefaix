@@ -24,6 +24,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# JANUS_PREFAIX_CI_MODE=janus moves trusted ordinary Linux matrices to Janus.
+# Keep all eight hosted macOS lanes and complete fork/manual/release matrices.
 jobs:
   event-source:
     name: CI event source
@@ -70,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON(vars.JANUS_PREFAIX_CI_MODE == 'janus' && github.repository == 'MiraiForge/prefaix' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.base_ref == 'main')) && github.workflow_ref == format('{0}/.github/workflows/ci.yml@{1}', github.repository, github.ref) && '["macos-latest"]' || '["ubuntu-latest","macos-latest"]') }}
         node: [22, 24, 26]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -134,7 +136,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: ${{ fromJSON(vars.JANUS_PREFAIX_CI_MODE == 'janus' && github.repository == 'MiraiForge/prefaix' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.base_ref == 'main')) && github.workflow_ref == format('{0}/.github/workflows/ci.yml@{1}', github.repository, github.ref) && '["macos-15"]' || '["ubuntu-24.04","macos-15"]') }}
         node: [22, 24, 26]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -200,19 +202,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            bash: "4.4"
-            fish: "3.6.4"
-          - os: ubuntu-latest
-            bash: "5.2"
-            fish: "4.0.2"
-          - os: macos-latest
-            bash: "4.4"
-            fish: "3.6.4"
-          - os: macos-latest
-            bash: "5.2"
-            fish: "4.0.2"
+        include: ${{ fromJSON(vars.JANUS_PREFAIX_CI_MODE == 'janus' && github.repository == 'MiraiForge/prefaix' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.base_ref == 'main')) && github.workflow_ref == format('{0}/.github/workflows/ci.yml@{1}', github.repository, github.ref) && '[{"os":"macos-latest","bash":"4.4","fish":"3.6.4"},{"os":"macos-latest","bash":"5.2","fish":"4.0.2"}]' || '[{"os":"ubuntu-latest","bash":"4.4","fish":"3.6.4"},{"os":"ubuntu-latest","bash":"5.2","fish":"4.0.2"},{"os":"macos-latest","bash":"4.4","fish":"3.6.4"},{"os":"macos-latest","bash":"5.2","fish":"4.0.2"}]') }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -300,10 +290,141 @@ jobs:
     if: always()
     needs: [check, performance, shell-versions]
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      statuses: read
     steps:
-      - name: Require every validation matrix entry
+      - name: Reject canceled CI
+        if: cancelled()
+        run: exit 1
+      - name: Verify required CI
         env:
-          CHECK_RESULT: ${{ needs.check.result }}
-          PERFORMANCE_RESULT: ${{ needs.performance.result }}
-          SHELL_RESULT: ${{ needs.shell-versions.result }}
-        run: test "$CHECK_RESULT" = success && test "$PERFORMANCE_RESULT" = success && test "$SHELL_RESULT" = success
+          HOSTED_RESULTS: ${{ toJSON(needs) }}
+          REQUIRED_HOSTED_JOBS: '["check","performance","shell-versions"]'
+          USE_JANUS: ${{ vars.JANUS_PREFAIX_CI_MODE == 'janus' && github.repository == 'MiraiForge/prefaix' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.base_ref == 'main')) && github.workflow_ref == format('{0}/.github/workflows/ci.yml@{1}', github.repository, github.ref) }}
+          EXPECTED_REPOSITORY: MiraiForge/prefaix
+          JANUS_PIPELINE: prefaix-shadow-ci
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import http.client
+          import json
+          import os
+          import re
+          import time
+          import urllib.error
+          import urllib.request
+
+
+          def selected_status(rows, context, pipeline):
+              if not isinstance(rows, list):
+                  raise ValueError('GitHub status response must be a list')
+              # The commit-status endpoint returns newest first. Never fall back to an
+              # older success when the latest matching status is pending or failed.
+              row = next((item for item in rows if item.get('context') == context), None)
+              if row is None:
+                  return None
+              creator = row.get('creator') or {}
+              if (creator.get('id'), creator.get('login'), creator.get('type')) != (
+                  20291210, 'buildkite-limited-access[bot]', 'Bot'
+              ):
+                  raise ValueError('Janus status was not written by the approved Buildkite app')
+              prefix = 'https://buildkite.com/mirai-forge/' + pipeline + '/builds/'
+              if not re.fullmatch(re.escape(prefix) + r'[1-9][0-9]*', row.get('target_url') or ''):
+                  raise ValueError('Janus aggregate target is not the approved pipeline build')
+              state = row.get('state')
+              if state not in ('pending', 'success', 'failure', 'error'):
+                  raise ValueError('Unknown Janus status state')
+              return state
+
+
+          def main():
+              needs = json.loads(os.environ['HOSTED_RESULTS'])
+              use_janus = os.environ['USE_JANUS'] == 'true'
+              required = json.loads(os.environ.get('REQUIRED_HOSTED_JOBS', '[]'))
+              allowed = ('success', 'skipped') if use_janus else ('success',)
+              if (not needs or any(job.get('result') not in allowed for job in needs.values())
+                      or any(needs.get(name, {}).get('result') != 'success' for name in required)):
+                  raise SystemExit('A required hosted job did not pass')
+              if not use_janus:
+                  print('Required hosted jobs passed')
+                  return
+              repository = os.environ['EXPECTED_REPOSITORY']
+              pipeline = os.environ['JANUS_PIPELINE']
+              if os.environ['GITHUB_REPOSITORY'] != repository:
+                  raise SystemExit('Repository identity mismatch')
+              with open(os.environ['GITHUB_EVENT_PATH']) as event_file:
+                  event = json.load(event_file)
+              if os.environ['GITHUB_EVENT_NAME'] == 'pull_request':
+                  pr = event['pull_request']
+                  if pr['head']['repo']['full_name'] != repository or pr['base']['ref'] != 'main':
+                      raise SystemExit('Janus requires a same-repository PR targeting main')
+                  sha = pr['head']['sha']
+                  context = 'buildkite/' + pipeline + '/pr'
+              elif os.environ['GITHUB_EVENT_NAME'] == 'push' and os.environ['GITHUB_REF'] == 'refs/heads/main':
+                  sha = os.environ['GITHUB_SHA']
+                  context = 'buildkite/' + pipeline
+              else:
+                  raise SystemExit('Event is not admitted to Janus ordinary CI')
+              if not re.fullmatch(r'[0-9a-f]{40}', sha):
+                  raise SystemExit('Source must be an exact commit')
+              url = 'https://api.github.com/repos/' + repository + '/commits/' + sha + '/statuses?per_page=100&page='
+              headers = {
+                  'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              }
+              deadline = time.monotonic() + 30 * 60
+              page = 1
+              # The shared cap counts every page and every failed request.
+              for _ in range(121):
+                  remaining = deadline - time.monotonic()
+                  if remaining <= 0:
+                      break
+                  delay = 15
+                  request = urllib.request.Request(url + str(page), headers=headers)
+                  try:
+                      with urllib.request.urlopen(request, timeout=min(10, remaining)) as response:
+                          rows = json.load(response)
+                  except urllib.error.HTTPError as error:
+                      retry_after = error.headers.get('Retry-After', '') if error.headers else ''
+                      reset = error.headers.get('X-RateLimit-Reset', '') if error.headers else ''
+                      exhausted = error.headers and error.headers.get('X-RateLimit-Remaining') == '0'
+                      retryable = error.code in (429, 500, 502, 503, 504)
+                      limited = False
+                      try:
+                          limited = error.code == 403 and (
+                              bool(retry_after) or exhausted or 'secondary rate limit' in
+                              error.read(4096).decode('utf-8', errors='replace').lower()
+                          )
+                      except (OSError, http.client.HTTPException):
+                          retryable = True
+                      finally:
+                          error.close()
+                      if not limited and not retryable:
+                          raise
+                      if retry_after.isdigit():
+                          delay = max(delay, int(retry_after))
+                      if exhausted and reset.isdigit():
+                          delay = max(delay, int(reset) - time.time())
+                  except (OSError, http.client.HTTPException, json.JSONDecodeError):
+                      pass
+                  else:
+                      state = selected_status(rows, context, pipeline)
+                      if state == 'success':
+                          print('Verified ' + context + ' for ' + sha)
+                          return
+                      if state in ('failure', 'error'):
+                          raise SystemExit('Janus ordinary CI failed for ' + sha)
+                      if state is None and len(rows) == 100:
+                          page += 1
+                          continue
+                  page = 1
+                  time.sleep(min(delay, max(0, deadline - time.monotonic())))
+              raise SystemExit('Janus ordinary CI did not pass within 30 minutes or 121 reads')
+
+
+          if __name__ == '__main__':
+              main()
+          PY
