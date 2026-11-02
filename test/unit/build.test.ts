@@ -124,6 +124,72 @@ describe("application bundles", () => {
     );
   });
 
+  it("keeps doctor probes out of the foreground bundle but runs them on demand", () => {
+    const cwd = workspace();
+    for (const directory of ["cli", "core", "client", "agents"])
+      mkdirSync(join(cwd, "src", directory), { recursive: true });
+    for (const file of ["cli/run.ts", "core/errors.ts"])
+      writeFileSync(
+        join(cwd, "src", file),
+        readFileSync(join(root, "src", file)),
+      );
+    writeFileSync(
+      join(cwd, "src/cli/bin.ts"),
+      "export const fixture = true;\n",
+    );
+    writeFileSync(
+      join(cwd, "src/core/paths.ts"),
+      "export function resolvePaths() { return {}; }\n",
+    );
+    writeFileSync(
+      join(cwd, "src/client/run.ts"),
+      'export async function run(options) { return options.argv[0] === "doctor" ? options.doctor({shell: "zsh", shellVersion: "5"}) : 0; }\n',
+    );
+    writeFileSync(
+      join(cwd, "src/agents/doctor-probe.ts"),
+      'import {createHash} from "node:crypto"; export const result = createHash("sha256").update("probe").digest("hex");\n',
+    );
+    writeFileSync(
+      join(cwd, "src/cli/doctor.ts"),
+      'import {result} from "../agents/doctor-probe.js"; export function runDoctor(options) { options.out(result); return 0; }\n',
+    );
+    const result = build(cwd);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(existsSync(join(cwd, "dist/doctor.js"))).toBe(true);
+    const sources = JSON.parse(
+      readFileSync(join(cwd, "dist/client.js.map"), "utf8"),
+    ).sources as string[];
+    expect(sources.some((source) => source.includes("/agents/"))).toBe(false);
+    expect(sources.some((source) => source.endsWith("/cli/doctor.ts"))).toBe(
+      false,
+    );
+    const probe = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const {runClient} = await import("./dist/client.js");
+        const output = [];
+        const options = {version: "0.0.0", out: value => output.push(value)};
+        const ordinary = await runClient({...options, argv: []});
+        const before = process.moduleLoadList.includes("NativeModule crypto");
+        const doctor = await runClient({...options, argv: ["doctor"]});
+        console.log(JSON.stringify({ordinary, doctor, before, output,
+          after: process.moduleLoadList.includes("NativeModule crypto")}));`,
+      ],
+      { cwd, encoding: "utf8" },
+    );
+    expect(probe.status, probe.stderr).toBe(0);
+    const observed = JSON.parse(probe.stdout);
+    expect(observed.ordinary).toBe(0);
+    expect(observed.doctor).toBe(0);
+    expect(observed.before).toBe(false);
+    expect(observed.after).toBe(true);
+    expect(observed.output).toEqual([
+      "ba9c736f19e7f60b7f6764adb0b7908c0a2b394e09b6c09863528c7f2bc86095",
+    ]);
+  });
+
   it("loads commit-only builtins only when the bundled commit path is called", () => {
     const cwd = workspace();
     const init = spawnSync("git", ["init", "--quiet"], {

@@ -5,6 +5,7 @@ export default defineConfig(() => {
   const entry = Object.fromEntries(
     Object.entries({
       prefaix: "src/cli/bin.ts",
+      doctor: "src/cli/doctor.ts",
       "pi-bridge": "src/agents/pi/bridge.ts",
     }).filter(([, path]) => existsSync(path)),
   );
@@ -38,6 +39,9 @@ export default defineConfig(() => {
             // One cacheable foreground module, without pulling daemon/adapters
             // into it or resolving a graph of shared chunks on every shell turn.
             entry: { client: "src/cli/run.ts" },
+            // Keep the optional doctor and its agent probes in the separately
+            // emitted entry; inlining a dynamic import still hoists its imports.
+            external: ["./doctor.js"],
             splitting: false,
           },
         ]
