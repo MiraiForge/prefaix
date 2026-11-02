@@ -1,5 +1,3 @@
-import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { PrefaixError } from "../core/errors.js";
 
 export interface StagedDiff {
@@ -20,12 +18,16 @@ const DIFF_ARGS = [
 ];
 
 /** Stream and hash the whole index diff, retaining at most the configured cap. */
-export function stagedDiff(
+export async function stagedDiff(
   cwd: string,
   env: Record<string, string>,
   maxBytes: number,
   signal?: AbortSignal,
 ): Promise<StagedDiff> {
+  const [{ spawn }, { createHash }] = await Promise.all([
+    import("node:child_process"),
+    import("node:crypto"),
+  ]);
   return new Promise((resolve, reject) => {
     const child = spawn("git", DIFF_ARGS, {
       cwd,
@@ -95,6 +97,7 @@ export async function runCommit(
       "USAGE",
       "staged changes changed while drafting; run :commit again",
     );
+  const { spawn } = await import("node:child_process");
   await new Promise<void>((resolve, reject) => {
     const child = spawn("git", ["commit", "-m", message], {
       cwd,

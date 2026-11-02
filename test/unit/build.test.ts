@@ -124,6 +124,55 @@ describe("application bundles", () => {
     );
   });
 
+  it("loads commit-only builtins only when the bundled commit path is called", () => {
+    const cwd = workspace();
+    const init = spawnSync("git", ["init", "--quiet"], {
+      cwd,
+      encoding: "utf8",
+    });
+    expect(init.status, init.stdout + init.stderr).toBe(0);
+    for (const directory of ["cli", "core", "context"])
+      mkdirSync(join(cwd, "src", directory), { recursive: true });
+    for (const file of ["core/errors.ts", "context/staged-diff.ts"])
+      writeFileSync(
+        join(cwd, "src", file),
+        readFileSync(join(root, "src", file)),
+      );
+    writeFileSync(
+      join(cwd, "src/cli/bin.ts"),
+      "export const fixture = true;\n",
+    );
+    writeFileSync(
+      join(cwd, "src/cli/run.ts"),
+      'export async function runClient() { const {stagedDiff} = await import("../context/staged-diff.js"); return stagedDiff(process.cwd(), {PATH: process.env.PATH}, 0); }\n',
+    );
+    const result = build(cwd);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    const probe = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const {runClient} = await import("./dist/client.js");
+        const modules = () => process.moduleLoadList.filter(name =>
+          name === "NativeModule crypto" || name === "NativeModule child_process");
+        const before = modules();
+        let failure;
+        try { await runClient(); } catch (error) { failure = error.code; }
+        console.log(JSON.stringify({before, after: modules(), failure}));`,
+      ],
+      { cwd, encoding: "utf8" },
+    );
+    expect(probe.status, probe.stderr).toBe(0);
+    const observed = JSON.parse(probe.stdout);
+    expect(observed.before).toEqual([]);
+    expect(observed.after.sort()).toEqual([
+      "NativeModule child_process",
+      "NativeModule crypto",
+    ]);
+    expect(observed.failure).toBe("USAGE");
+  });
+
   it("builds both named ESM bundles with source maps and preserves the CLI shebang", () => {
     const cwd = workspace();
     mkdirSync(join(cwd, "src/cli"), { recursive: true });
