@@ -2,7 +2,7 @@
 
 M3 implementation does not authorize publishing. `package.json` stays private
 until Allan explicitly approves the release after all gates below have current
-evidence. Beads `prefaix-mbd.13` is the release task.
+evidence.
 
 | Gate | Evidence required |
 |---|---|
@@ -68,4 +68,4 @@ The workflow publishes, installs the exact registry version into a clean
 prefix, checks the CLI and all init outputs, and creates a GitHub release from
 `docs/releases/0.1.0.md`. Inspect the npm provenance and complete the README
 walkthrough on a clean machine. Confirm that the prefaix.dev placeholder links
-to the README. Record URLs and results in Beads before closing M3.
+to the README. Record URLs and results before closing M3.

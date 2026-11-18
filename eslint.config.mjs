@@ -35,7 +35,6 @@ export default defineConfig([
     "dist/**",
     "build/**",
     "coverage/**",
-    ".beads/**",
     ".agents/**",
     ".claude/**",
     ".codex/**",

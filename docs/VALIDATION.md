@@ -1,7 +1,7 @@
 # M3 validation
 
-Beads epic `prefaix-mbd` owns the acceptance record. Passing local tests is not
-proof of Linux CI, a three-day user trial, or publication.
+Passing local tests is not proof of Linux CI, a three-day user trial, or
+publication.
 
 ## Green exact-head CI and main protection: 2026-10-08
 
@@ -847,5 +847,5 @@ check, coverage, and regression logs are in `build/m3-validation`.
 The roadmap separately requires Allan's README-only fresh-machine walkthrough,
 a clean doctor result in the daily-driver shell after removing Forge, and three
 days of normal use on at least two shells without tty corruption or lost
-text. Record the actual dates, shells, terminal, and outcome in Beads. Do not
+text. Record the actual dates, shells, terminal, and outcome. Do not
 backfill these from tests or elapsed agent runtime.

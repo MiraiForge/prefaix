@@ -3,9 +3,8 @@
 This roadmap builds out the system described in [DESIGN.md](DESIGN.md).
 
 - Estimates assume one developer working with coding agents. Each is in **ideal days (d)**.
-- Task IDs (`P0-1`, `S3`, `M2-5`, …) are stable, so they can be loaded into bd/beads or GitHub issues as-is.
+- Task IDs (`P0-1`, `S3`, `M2-5`, …) are stable, so they can be loaded into an issue tracker as-is.
 - `dep:` lists the tasks that must land first.
-- **Live tracking is in beads** (`bd ready`, `bd show <id>`), synced to the private DoltHub database `aditzel/prefaix`. Each bead's `external_ref` is `roadmap:<ID>`, which maps it back to this file. Tasks that depend on "M3" as a whole are wired to M3-10 in beads, because bd doesn't let an epic block a task.
 
 ## Timeline at a glance
 
@@ -159,8 +158,7 @@ The [validation guide](VALIDATION.md) describes the native version
 matrix, stability runs, and performance method, and the
 [release gate](RELEASE.md) separates local evidence from Linux CI, required-check
 configuration, the README walkthrough, the daily-use trial, and publishing.
-Beads `prefaix-mbd` remains the current acceptance record. The package is still
-private and no release is implied by this implementation.
+The package is still private and no release is implied by this implementation.
 
 ---
 

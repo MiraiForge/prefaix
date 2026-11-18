@@ -55,8 +55,8 @@ its pending hook gracefully.
 
 The [detailed roadmap](docs/ROADMAP.md) defines tasks and acceptance criteria;
 the [validation guide](docs/VALIDATION.md) and [release gate](docs/RELEASE.md)
-define the remaining evidence. Beads remains the live task source of truth;
-this section is a public progress summary, not a separate task tracker.
+define the remaining evidence. This section is a public progress summary, not
+a task tracker.
 
 ### Local validation snapshot
 
@@ -383,9 +383,8 @@ For a no-cost demo, export `PREFAIX_BACKEND=fake` and optionally
 demo daemon (`prefaix daemon stop`) before returning to pi.
 
 See the [validation guide](docs/VALIDATION.md) for the shell version matrix and
-50-rerun gate. Beads is the task source of truth; its private DoltHub data must
-never enter the public repository. Publishing requires Allan's explicit
-approval, separate from implementation.
+50-rerun gate. Publishing requires Allan's explicit approval, separate from
+implementation.
 
 ## License
 
