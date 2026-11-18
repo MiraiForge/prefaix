@@ -9,3 +9,8 @@ coverage/
 !.env.example
 .prefaix/
 *.tsbuildinfo
+
+# Retired beads/Dolt issue tracker (removed 2026-11-18): keep local leftovers out of git
+/.beads/
+/.dolt/
+.beads-credential-key
